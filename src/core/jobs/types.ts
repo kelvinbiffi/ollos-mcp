@@ -41,6 +41,8 @@ export interface JobEvent {
   durationMs?: number
   message?: string
   data?: Record<string, unknown>
+  /** Process memory at the time of the event, in MB. Present only when OLLOS_DEBUG_MEM=1. */
+  mem?: { rss: number; heap: number; arrayBuffers: number }
 }
 
 export interface JobContext {

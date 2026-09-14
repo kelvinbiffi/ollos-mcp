@@ -23,6 +23,8 @@ First release. Everything below was measured on real media before being made the
 - Source resolver: local path, Zoom recording folder, direct URL (SSRF-guarded, size-capped), video-site URL via `yt-dlp` (`OLLOS_YTDLP` path, `OLLOS_YTDLP_ARGS` allow-listed flags such as `--no-check-certificates` behind TLS-intercepting proxies), `data:` URI.
 - Content-addressed cache for transcripts, keyframes, OCR and downloads.
 - Stdout guard in the MCP entry point so native libraries cannot corrupt JSON-RPC.
+- **Model cache** (`PathCache`): ONNX weights are handed to ONNX Runtime as paths instead of going through transformers.js' `FileResponse`, whose unconsumed stream held the 2.43 GB encoder weights twice in JavaScript buffers. Peak memory for the default ASR model dropped from ~10 GB to ~4.3 GB; the model catalogue and docs now state the real sizes (2.75 GB accurate, 280 MB fast, 465 MB embeddings).
+- `OLLOS_DEBUG_MEM=1` stamps every job event with process memory; a requirements and performance table in the README.
 - **Evaluation harness** (`eval/`): WER/CER against caption references, speaker-count check, keyframe statistics over public fixtures; results published in `eval/RESULTS.md`.
 - 56 tests; smoke scripts against real media; design document (English, with the original Portuguese draft); agent skill; MCP Registry manifest; CI on Linux/Windows/macOS × Node 20/22; release workflow with npm provenance.
 

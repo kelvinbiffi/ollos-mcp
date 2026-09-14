@@ -44,7 +44,7 @@ Node 20+. `npm install` brings its own ffmpeg (`ffmpeg-static`); a system ffmpeg
 
 ```bash
 npm i -g ollos-mcp
-ollos warmup            # download models once (~1 GB for the accurate ASR model)
+ollos warmup            # download models once (2.75 GB for the accurate ASR model, 3.3 GB for all)
 ollos doctor            # check ffmpeg, models, disk
 ```
 
@@ -124,6 +124,26 @@ Numbers below were measured on an 11:37 screencast (1890×1080, webcam overlay) 
 
 On the interview, half the "errors" are insertions: Whisper keeps the repetitions and fillers the auto-captions drop, and several reference words are caption mistakes ("Clash Orto" for Glassdoor, which ollos got right). Keyframes reduced the 10-minute screencast to 120 frames on 14 sheets and the talk to 51 frames on 6 sheets. Speed on that run was 0.2–0.35× real time on a loaded machine; the same model measures 1.7× in isolation. How to reproduce, and what each number means, is in [eval/README.md](eval/README.md).
 
+## Requirements and performance
+
+Measured on the eval fixtures with the process memory sampled every 200 ms (`scripts/probe-memory.mts`). Machine: Intel i9-12900HX (16 cores), Windows 11, Node 20, while other processes used about 18% of the CPU.
+
+| What | Disk (models) | Peak process memory | Speed |
+|---|---|---|---|
+| `ollos_probe`, `ollos_keyframes`, `ollos_review` without OCR | none | ~200 MB | keyframes: 2 min of video in ~15 s |
+| Transcription, `model: "fast"` (whisper-base) | 280 MB | **~1.9 GB** | 60 s of audio in ~15 s after load (~4× real time) |
+| Transcription, default (whisper-large-v3-turbo, fp32 encoder + q4 decoder) | 2.75 GB | **~4.3 GB** | 60 s of audio in ~46 s (~1.3× real time; 1.7× on an idle machine) |
+| + `ollos_diarize` (pyannote + WeSpeaker) | +32 MB | +0.1 GB | 60 s in ~5 s once loaded |
+| + `ollos_search` (multilingual-e5-small) | +465 MB | +0.8 GB | index build ~4 s per transcript |
+| `ollos_read_screen` / review with OCR (2 Tesseract workers) | 8 MB | +0.3 GB | ~1 s per frame at native resolution |
+| Everything loaded at once | 3.3 GB | **~5.1 GB** | |
+
+Minimums that follow from this: **8 GB of RAM** for the default model (4 GB is enough for `model: "fast"`), **4 GB of free disk** for all models, any x64 or arm64 CPU (no GPU is used). Transcription speed scales with CPU cores and is the only stage that is compute-bound; a 4-core laptop should expect roughly 0.4× real time on the default model, so a one-hour meeting takes over two hours, or about 40 minutes with `model: "fast"`.
+
+Models stay loaded for the life of the server process; nothing is unloaded on idle yet. The peak above used to be ~10 GB: transformers.js' file cache streamed the 2.4 GB encoder weights into JavaScript buffers that nothing read, on top of ONNX Runtime's own memory-mapped copy. ollos now hands model paths to ONNX Runtime directly (see `PathCache` in `src/core/models.ts`). Set `OLLOS_DEBUG_MEM=1` to stamp every job event with process memory and read them with `ollos events <id>`.
+
+There is no memory cap setting today. What exists: `OLLOS_MAX_DURATION_SEC` (refuse long media), `from`/`to` (work on a window), `OLLOS_CONCURRENCY_*` (parallel jobs per class; ASR is always 1), and `model: "fast"` for machines with little RAM. `ollos doctor` reports free memory against the default model's needs.
+
 ## Privacy & security
 
 - Nothing is uploaded. Network is used only to download models once and to fetch a source URL you pass.
@@ -144,12 +164,13 @@ On the interview, half the "errors" are insertions: Whisper keeps the repetition
 | `OLLOS_CONCURRENCY_VISION` / `_OCR` | `2` | parallel jobs per class (ASR is fixed at 1) |
 | `OLLOS_FFMPEG` / `OLLOS_FFPROBE` / `OLLOS_YTDLP` | auto | explicit binary paths |
 | `OLLOS_YTDLP_ARGS` | — | extra yt-dlp flags for every site download, allow-listed (e.g. `--no-check-certificates --js-runtimes node`) |
+| `OLLOS_DEBUG_MEM` | `0` | `1` stamps every job event with process memory (rss, heap, arrayBuffers in MB) |
 
 Site downloads (YouTube, Instagram, TikTok…) need `yt-dlp` on your PATH (or `OLLOS_YTDLP`) and are best-effort: platforms change often. Behind a corporate proxy that re-signs TLS, set `OLLOS_YTDLP_ARGS="--no-check-certificates"`. Local files always work.
 
 ## Known limits
 
-- First run downloads ~1 GB (accurate ASR). `model: "fast"` uses a 150 MB model and misreads technical terms.
+- First run downloads 2.75 GB (accurate ASR) and needs ~4.3 GB of RAM while transcribing. `model: "fast"` uses a 280 MB model in ~1.9 GB of RAM and misreads technical terms. No memory cap yet; models are not unloaded on idle.
 - Segment `confidence` is a heuristic (speech coverage, speaking rate, filters), not a model probability.
 - Text around 8 px in the source video is at the edge of what OCR reads: detection of a secret that small depends on the exact frame, so ollos reads several frames around each hard cut. Below that, the UI-context signal still flags the situation ("API Key Created" is read reliably).
 - `ollos_diarize` is experimental. Speech with background music (intros, jingles, outros) embeds far from the same voice on clean speech and comes out as an extra speaker regardless of the merge threshold (measured in `eval/`). Heavy crosstalk is unsolved. With Zoom per-participant tracks the result is exact.

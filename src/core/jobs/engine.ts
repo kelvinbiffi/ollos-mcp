@@ -4,6 +4,14 @@ import { asOllosError, OllosError } from '../errors.js'
 import { JobStore } from './store.js'
 import type { JobContext, JobDefinition, JobRecord } from './types.js'
 
+/** OLLOS_DEBUG_MEM=1 stamps every job event with process memory (MB), so `ollos events <id>` shows which stage holds what. */
+const DEBUG_MEM = process.env.OLLOS_DEBUG_MEM === '1'
+function memSnapshot(): { rss: number; heap: number; arrayBuffers: number } {
+  const m = process.memoryUsage()
+  const mb = (n: number) => Math.round(n / 1048576)
+  return { rss: mb(m.rss), heap: mb(m.heapUsed), arrayBuffers: mb(m.arrayBuffers) }
+}
+
 class Semaphore {
   private queue: Array<() => void> = []
   private active = 0
@@ -173,7 +181,7 @@ export class JobEngine {
           j.heartbeatAt = new Date().toISOString()
           this.store.save(j)
         },
-        event: (e) => this.store.appendEvent(job.id, { ts: new Date().toISOString(), ...e }),
+        event: (e) => this.store.appendEvent(job.id, { ts: new Date().toISOString(), ...e, ...(DEBUG_MEM ? { mem: memSnapshot() } : {}) }),
       }
       ctx.event({ stage: 'job', event: 'start', data: { kind: job.kind, resourceClass: cls } })
       const result = await def.run(job.params, ctx)

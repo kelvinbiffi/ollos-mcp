@@ -137,7 +137,22 @@ One frame every 5–8 s, real coverage, ~11–16 contact sheets for 11 minutes. 
 
 On the "API Key Created" modal: title recognised, instruction text recognised, and a **157-character high-entropy string** detected. The plain JWT regex **missed** — OCR read `eyJ` as `eyl`. With an OCR-tolerant JWT pattern, native-resolution frames and a centred OCR tile, the end-to-end run reports `high · jwt · near "API Key"`. The first scanner version also produced 58 false positives by running the entropy test on whitespace-stripped text; that is now a regression test.
 
-### 3.7 Client
+### 3.7 Memory
+
+Sampled every 200 ms in-process (`scripts/probe-memory.mts`), on the IBM fixture, after the fixes below:
+
+| Step | Peak RSS | Live ArrayBuffers |
+|---|---|---|
+| Node + ollos, nothing loaded | 0.2 GB | ~0 |
+| `whisper-base` transcribing 60 s | 1.9 GB | |
+| `whisper-large-v3-turbo` transcribing 60 s | **4.3 GB** | 0.09 GB |
+| + diarization models | 4.4 GB | 0.10 GB |
+| + `multilingual-e5-small` for search | **5.1 GB** | |
+| keyframes alone (ffmpeg + sharp, no models) | 0.2 GB | |
+
+Before the fix the same run peaked at **~10 GB**, and the eval's first probe showed RSS climbing by 4.8 GB *after* a transcription had finished. Tracing async file operations with `async_hooks` found 42,000 `fs.createReadStream` reads in 4 s: transformers.js' `FileResponse` opens a stream of every cached file in its constructor and pipes it into a web `ReadableStream`; for `.onnx` files in Node only the *path* is used, so nothing reads the stream, and the whole 2.43 GB encoder weights file (twice — two lookups) sat in JavaScript buffers until garbage collection. `PathCache` (§5.11) answers those lookups with a string path, which transformers.js forwards to ONNX Runtime unchanged. A 2× reduction in the minimum machine, found by measuring rather than by reading the docs.
+
+### 3.8 Client
 
 The author's Claude Code was 2.1.141. The v2 runtime (MCP SDK 2.0, protocol 2026-07-28, Tasks extension) requires ≥ 2.1.232. This decides §5.3.3.
 
@@ -440,15 +455,17 @@ Local media identity: full SHA-256 up to 64 MB, `size + mtime + path` above. In 
 
 | Role | Model | Approx. size |
 |---|---|---|
-| ASR default | `onnx-community/whisper-large-v3-turbo` (q4) | ~800 MB |
-| ASR fast | `Xenova/whisper-base` | ~150 MB |
+| ASR default | `onnx-community/whisper-large-v3-turbo` (fp32 encoder 2.43 GB, q4 decoder 0.32 GB) | 2.75 GB |
+| ASR fast | `Xenova/whisper-base` | 280 MB |
 | VAD | `onnx-community/silero-vad` | ~2 MB |
 | Segmentation | `onnx-community/pyannote-segmentation-3.0` | ~6 MB |
 | Speaker | `onnx-community/wespeaker-voxceleb-resnet34-LM` | ~26 MB |
-| Text embedding | `Xenova/multilingual-e5-small` | ~120 MB |
+| Text embedding | `Xenova/multilingual-e5-small` | 465 MB |
 | OCR | Tesseract `por` + `eng` | ~15 MB |
 
 None requires a token. Downloads are lazy per capability with progress; `ollos warmup [--all]` fetches ahead; `OLLOS_OFFLINE=1` forbids network and fails clearly if a model is missing.
+
+Model files are served to transformers.js through ollos' own `PathCache` (same on-disk layout as the library's `FileCache`, so nothing is downloaded twice): ONNX weights are returned as a path string, which the library hands to ONNX Runtime to memory-map; JSON and tokenizer files are returned as an in-memory `Response`. This exists because the library's cache streams every hit into memory whether or not anyone reads it (§3.7).
 
 ---
 
@@ -581,7 +598,7 @@ All six planned slices are implemented: ears (probe, transcribe, jobs), eyes (ke
 | yt-dlp breaks frequently | site downloads fail | best-effort, error carries yt-dlp's message, local files always work |
 | Text under ~8 px on screen | secret missed | native-width frames, centre tile, several frames around each cut; UI-context signal still flags the situation |
 | WASM slow on weak machines | 2-hour meeting takes hours | `model: "fast"`, VAD, honest progress and ETA |
-| ~1 GB download on first use | install abandonment | explicit `warmup`, progress, smaller model available, size stated in the README |
+| 2.75 GB download and ~4.3 GB of RAM for the default model | install abandonment, out-of-memory on small machines | explicit `warmup`, progress, `model: "fast"` (280 MB, ~1.9 GB), sizes and a requirements table in the README; roadmap: idle unloading and a memory guard in `doctor` |
 | Secret false positives | noise in the review | confidence per finding; `block` only on strong patterns; regression tests from the real run |
 
 ---

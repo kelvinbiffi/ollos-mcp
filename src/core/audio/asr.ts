@@ -35,6 +35,7 @@ export function loadAsr(choice: AsrModelChoice | undefined, config: OllosConfig,
   if (!p) {
     const accurate = id === config.models.asrAccurate
     p = pipeline('automatic-speech-recognition', id, {
+      // fp32 encoder (2.43 GB on disk, memory-mapped by ONNX Runtime) + q4 decoder: ~4.3 GB peak RSS while transcribing.
       dtype: accurate ? { encoder_model: 'fp32', decoder_model_merged: 'q4' } : undefined,
       progress_callback: (ev: { status?: string; file?: string; progress?: number }) => {
         if (ev.status === 'progress' && ev.file) onProgress?.(`downloading ${ev.file} ${Math.round(ev.progress ?? 0)}%`)

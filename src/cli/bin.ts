@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { createOllos, type JobRecord } from '../core/index.js'
@@ -202,6 +203,12 @@ async function main() {
         const ok = m.file ? fs.existsSync(m.file.dest) : isModelCached(m.id, ollos.config)
         lines.push(`${m.role.padEnd(12)} ${ok ? '✓' : '·'} ${m.id} (~${m.approxMb} MB)`)
       }
+      // Measured peaks (scripts/probe-memory.mts): default ASR ~4.3 GB RSS, fast ~1.9 GB, everything loaded ~5.1 GB.
+      const gb = (n: number) => (n / 1024 ** 3).toFixed(1)
+      const free = os.freemem()
+      const verdict = free >= 5.5 * 1024 ** 3 ? 'ok for the default model' : free >= 2.5 * 1024 ** 3 ? 'tight for the default model (~4.3 GB peak) — consider model: "fast" (~1.9 GB)' : 'not enough free memory even for model: "fast" (~1.9 GB)'
+      lines.push(`memory    ${gb(free)} GB free of ${gb(os.totalmem())} GB — ${verdict}`)
+      lines.push(`cpu       ${os.cpus().length} logical cores — transcription speed scales with cores (16 cores ≈ 1.7× real time on the default model)`)
       lines.push(`offline   ${ollos.config.offline}`)
       lines.push(`jobs      ${ollos.jobs().length}`)
       lines.push(`node      ${process.version} ${process.platform} ${process.arch}`)
