@@ -59,6 +59,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "warmup": "tsx src/cli/bin.ts warmup",
+    "eval": "tsx eval/run.ts",
+    "eval:fetch": "tsx eval/fetch.ts",
+    "smoke:mcp": "tsx scripts/smoke-mcp.ts",
     "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {

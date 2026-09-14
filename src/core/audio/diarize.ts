@@ -62,7 +62,9 @@ export function toTurns(segs: LocalSegment[], minSec = 0.6): Array<{ start: numb
 /**
  * Step 2 — one embedding per turn. WeSpeaker ResNet34, 256 dimensions, L2-normalised.
  * Measured: three 5-second embeddings in 2.7 s. Same-speaker similarity measured 0.47–0.53 on a noisy screencast —
- * lower than the 0.6–0.8 typical on clean speech — which is why the merge threshold is a parameter, default 0.40.
+ * lower than the 0.6–0.8 typical on clean speech — which is why the merge threshold is a parameter, default 0.35.
+ * Measured on the eval fixtures: the same voice scores 0.58–0.86 with itself across positions and lengths, but 0.06–0.16
+ * when background music is under it — jingles and outros form their own cluster. See scripts/probe-speaker-embeddings.mts.
  */
 export async function speakerEmbeddings(pcm: Float32Array, turns: Array<{ start: number; end: number }>, config: OllosConfig, signal?: AbortSignal, onProgress?: (i: number, n: number) => void): Promise<Float32Array[]> {
   configureModelRuntime(config)

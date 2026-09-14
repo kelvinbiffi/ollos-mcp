@@ -122,7 +122,8 @@ export async function runKeyframes(params: KeyframesParams, ctx: JobContext, con
 
   const candidates: Candidate[] = [
     ...kept.map((k) => ({ pts: k.pts, sources: new Set<CandidateSource>(['hash']), hash: dhashToHex(k.hash), distance: k.distance })),
-    ...cuts.map((c) => ({ pts: c + 0.4, sources: new Set<CandidateSource>(['cut']) })), // 0.4 s after the cut, once the new screen has settled
+    // 0.4 s after the cut, once the new screen has settled; never past the last decodable frame (a cut at the very end of the IBM fixture seeked past EOF and ffmpeg produced nothing)
+    ...cuts.map((c) => ({ pts: Math.min(c + 0.4, to - 0.25), sources: new Set<CandidateSource>(['cut']) })),
     ...(params.anchorsSec ?? []).filter((a) => a >= from && a <= to).map((a) => ({ pts: a, sources: new Set<CandidateSource>(['anchor']) })),
   ]
   let merged = mergeCandidates(candidates)
@@ -167,18 +168,30 @@ export async function runKeyframes(params: KeyframesParams, ctx: JobContext, con
 
   const frames: KeyFrame[] = []
   const buffers: Buffer[] = []
+  let skipped = 0
   const te = Date.now()
   for (let i = 0; i < merged.length; i++) {
     if (ctx.signal.aborted) throw new OllosError('CANCELLED', 'cancelled')
     const c = merged[i]!
-    const jpeg = await extractFrame(src.path, c.pts, config, { width: Math.min(frameWidth, video.width), signal: ctx.signal })
-    const file = path.join(framesDir, `${String(i + 1).padStart(3, '0')}.jpg`)
+    let jpeg: Buffer
+    try {
+      jpeg = await extractFrame(src.path, c.pts, config, { width: Math.min(frameWidth, video.width), signal: ctx.signal })
+    } catch (e) {
+      if (ctx.signal.aborted) throw e
+      // One undecodable instant (a seek past the last frame, a corrupt GOP) must not sink the other frames. Say so, skip it, and fail only if nothing came out.
+      skipped++
+      ctx.event({ stage: 'extract', event: 'info', message: `no frame at ${fmtTime(c.pts)}: ${(e as Error).message}`, data: { pts: c.pts } })
+      continue
+    }
+    const index = frames.length + 1
+    const file = path.join(framesDir, `${String(index).padStart(3, '0')}.jpg`)
     fs.writeFileSync(file, jpeg)
     buffers.push(jpeg)
-    frames.push({ index: i + 1, pts: Number(c.pts.toFixed(2)), sources: [...c.sources], hash: c.hash, distance: c.distance, file, sheet: 0, tile: 0 })
-    ctx.progress('extract', 0.3 + 0.5 * ((i + 1) / merged.length), `frame ${i + 1}/${merged.length} at ${fmtTime(c.pts)}`)
+    frames.push({ index, pts: Number(c.pts.toFixed(2)), sources: [...c.sources], hash: c.hash, distance: c.distance, file, sheet: 0, tile: 0 })
+    ctx.progress('extract', 0.3 + 0.5 * ((i + 1) / merged.length), `frame ${index}/${merged.length} at ${fmtTime(c.pts)}`)
   }
-  ctx.event({ stage: 'extract', event: 'end', durationMs: Date.now() - te, data: { frames: frames.length } })
+  if (frames.length === 0) throw new OllosError('PIPELINE_EMPTY_OUTPUT', `none of the ${merged.length} selected instants could be decoded`, { hint: 'The video stream may be corrupt. Try ollos_probe, or a narrower from/to window.' })
+  ctx.event({ stage: 'extract', event: 'end', durationMs: Date.now() - te, data: { frames: frames.length, skipped } })
 
   const cols = params.sheetCols ?? 3
   const per = cols * cols

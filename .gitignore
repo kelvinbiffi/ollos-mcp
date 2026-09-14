@@ -25,3 +25,7 @@ Thumbs.db
 
 # test scratch
 .ollos-test*/
+
+# evaluation inputs are not redistributed (media paths and third-party captions); results are committed
+eval/fixtures.local.json
+eval/references/

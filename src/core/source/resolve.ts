@@ -112,8 +112,11 @@ async function downloadSite(url: URL, config: OllosConfig, cache: Cache, opts: {
   const dir = cache.dir('download', key)
   const existing = fs.readdirSync(dir).find((f) => f.startsWith('media.') && !f.endsWith('.part'))
   if (existing) return path.join(dir, existing)
-  const allowed = new Set(['--cookies-from-browser', '--proxy', '--format', '-f', '--extractor-args', '--user-agent', '--referer', '--sleep-requests', '--limit-rate'])
-  const extra = (opts.ytDlpArgs ?? []).filter((a, i, arr) => allowed.has(a) || (i > 0 && allowed.has(arr[i - 1]!)))
+  // Allow-list: flags that tune the download. Never `--exec`, `--config-location`, `--paths` or anything that runs code or writes elsewhere.
+  const withValue = new Set(['--cookies-from-browser', '--proxy', '--format', '-f', '--extractor-args', '--user-agent', '--referer', '--sleep-requests', '--limit-rate', '--js-runtimes', '--remote-components'])
+  const flags = new Set(['--no-check-certificates', '--force-ipv4', '--force-ipv6', '--legacy-server-connect'])
+  const filterArgs = (list: string[]) => list.filter((a, i, arr) => withValue.has(a) || flags.has(a) || (i > 0 && withValue.has(arr[i - 1]!)))
+  const extra = [...filterArgs(config.ytDlpArgs), ...filterArgs(opts.ytDlpArgs ?? [])]
   const args = ['--no-playlist', '--no-progress', '--no-warnings', '-f', 'bv*[height<=1080]+ba/b[height<=1080]/b', '--merge-output-format', 'mp4', '-o', path.join(dir, 'media.%(ext)s'), ...(opts.cookiesFile ? ['--cookies', opts.cookiesFile] : []), ...extra, url.toString()]
   try {
     await run(bin, args, { signal: opts.signal, timeoutMs: 30 * 60_000 })
@@ -121,7 +124,7 @@ async function downloadSite(url: URL, config: OllosConfig, cache: Cache, opts: {
     const tail = (e as OllosError).details?.stderrTail as string | undefined
     throw new OllosError('YTDLP_FAILED', `yt-dlp could not download from ${url.hostname}`, {
       details: { stderrTail: tail },
-      hint: 'yt-dlp breaks whenever a platform changes. Try updating it (yt-dlp -U), passing cookiesFile for login-gated content, or download the file yourself and pass the local path.',
+      hint: 'yt-dlp breaks whenever a platform changes. Try updating it (yt-dlp -U), passing cookiesFile for login-gated content, setting OLLOS_YTDLP_ARGS (e.g. "--no-check-certificates" behind a TLS-intercepting proxy, "--js-runtimes node" for full YouTube format lists), or download the file yourself and pass the local path.',
     })
   }
   const got = fs.readdirSync(dir).find((f) => f.startsWith('media.') && !f.endsWith('.part'))

@@ -1,0 +1,101 @@
+{
+  "generatedAt": "2026-09-14T07:42:00.477Z",
+  "rows": [
+    {
+      "id": "bolder-dev-interview",
+      "kind": "interview",
+      "durationSec": 328,
+      "asr": {
+        "wer": 0.2626,
+        "cer": 0.17,
+        "referenceWords": 929,
+        "hypothesisWords": 1016,
+        "substitutions": 83,
+        "deletions": 37,
+        "insertions": 124,
+        "seconds": 1857.9,
+        "realtime": 0.18,
+        "filtered": 1,
+        "vadEngine": "silero"
+      },
+      "diarize": {
+        "expected": 2,
+        "found": 3,
+        "seconds": 116.3,
+        "method": "embeddings"
+      },
+      "keyframes": {
+        "frames": 54,
+        "sheets": 6,
+        "sampled": 327,
+        "afterHash": 51,
+        "cuts": 6,
+        "seconds": 239.2
+      }
+    },
+    {
+      "id": "karinelago-n8n-assistant",
+      "kind": "screencast",
+      "durationSec": 635,
+      "asr": {
+        "wer": 0.0889,
+        "cer": 0.0609,
+        "referenceWords": 2025,
+        "hypothesisWords": 2090,
+        "substitutions": 63,
+        "deletions": 26,
+        "insertions": 91,
+        "seconds": 1818,
+        "realtime": 0.35,
+        "filtered": 0,
+        "vadEngine": "silero"
+      },
+      "diarize": {
+        "expected": 1,
+        "found": 1,
+        "seconds": 63.5,
+        "method": "embeddings"
+      },
+      "keyframes": {
+        "frames": 120,
+        "sheets": 14,
+        "sampled": 635,
+        "afterHash": 321,
+        "cuts": 31,
+        "seconds": 126.2
+      }
+    },
+    {
+      "id": "ibm-what-is-mcp",
+      "kind": "talk",
+      "durationSec": 226,
+      "asr": {
+        "wer": 0.0138,
+        "cer": 0.0051,
+        "referenceWords": 579,
+        "hypothesisWords": 579,
+        "substitutions": 8,
+        "deletions": 0,
+        "insertions": 0,
+        "seconds": 784.3,
+        "realtime": 0.29,
+        "filtered": 0,
+        "vadEngine": "silero"
+      },
+      "diarize": {
+        "expected": 1,
+        "found": 2,
+        "seconds": 0.2,
+        "method": "embeddings"
+      },
+      "keyframes": {
+        "frames": 51,
+        "sheets": 6,
+        "sampled": 226,
+        "afterHash": 49,
+        "cuts": 1,
+        "seconds": 50.2
+      }
+    }
+  ]
+}

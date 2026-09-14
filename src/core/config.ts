@@ -28,6 +28,8 @@ export interface OllosConfig {
   heartbeatMs: number
   staleAfterMs: number
   ytDlpPath?: string
+  /** Extra yt-dlp flags applied to every site download, e.g. `--no-check-certificates --js-runtimes node` behind a TLS-intercepting proxy. Filtered through the same allow-list as per-call `ytDlpArgs`. */
+  ytDlpArgs: string[]
   ffmpegPath?: string
   ffprobePath?: string
 }
@@ -76,6 +78,7 @@ export function loadConfig(overrides: Partial<OllosConfig> = {}): OllosConfig {
     heartbeatMs: 5_000,
     staleAfterMs: 30_000,
     ytDlpPath: process.env.OLLOS_YTDLP,
+    ytDlpArgs: (process.env.OLLOS_YTDLP_ARGS ?? '').split(/\s+/).filter(Boolean),
     ffmpegPath: process.env.OLLOS_FFMPEG,
     ffprobePath: process.env.OLLOS_FFPROBE,
   }

@@ -1,0 +1,35 @@
+[
+  {
+    "id": "bolder-dev-interview",
+    "title": "Entrevista para programador (dev) na Europa — Cortes do Bolder Podcast",
+    "url": "https://www.youtube.com/watch?v=qCN7at36cS4",
+    "language": "pt",
+    "kind": "interview",
+    "expectedSpeakers": 2,
+    "durationSec": 328,
+    "vocabulary": ["Irlanda", "Holanda", "Dropbox", "Google", "screening", "freelancer", "Java", "startup"],
+    "notes": "Host + guest, Brazilian Portuguese, two clear voices, background music jingles. Reference = YouTube auto-captions (pt), so WER is an agreement rate between two recognisers."
+  },
+  {
+    "id": "karinelago-n8n-assistant",
+    "title": "O novo assistente do n8n monta automações em segundos — Karine Lago",
+    "url": "https://www.youtube.com/watch?v=t-S5G_h_BK4",
+    "language": "pt",
+    "kind": "screencast",
+    "expectedSpeakers": 1,
+    "durationSec": 635,
+    "vocabulary": ["n8n", "Hostinger", "VPS", "Claude", "workflow", "webhook", "Docker", "API"],
+    "notes": "Single presenter over a screen recording with chapters; UI vocabulary dominates. Reference = YouTube auto-captions (pt)."
+  },
+  {
+    "id": "ibm-what-is-mcp",
+    "title": "What is MCP? Integrate AI Agents with Databases & APIs — IBM Technology",
+    "url": "https://www.youtube.com/watch?v=eur8dUO9mvE",
+    "language": "en",
+    "kind": "talk",
+    "expectedSpeakers": 1,
+    "durationSec": 226,
+    "vocabulary": ["MCP", "Model Context Protocol", "LLM", "IDE", "NoSQL", "API"],
+    "notes": "Single speaker, lightboard talk, professional English captions (CC) — the closest thing to a human reference in this set."
+  }
+]

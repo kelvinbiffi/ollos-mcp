@@ -1,6 +1,13 @@
 # ollos-mcp
 
+[![CI](https://github.com/kelvinbiffi/ollos-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/kelvinbiffi/ollos-mcp/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/ollos-mcp.svg)](https://www.npmjs.com/package/ollos-mcp)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
+
 **Eyes and ears for AI agents.** Local, offline transcription, keyframes, on-screen text and a pre-publish review of any audio, video or image — as an MCP server, a CLI and a Node library. No Python, no cloud, no API key.
+
+**Docs:** [Tool reference](docs/TOOLS.md) · [Design doc — decisions and measurements](docs/DESIGN.md) · [Evaluation results](eval/RESULTS.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 > 11 minutes of screencast become 14 contact sheets and 3 KB of text. And it tells you if your API key is visible at 2:50.
 
@@ -101,9 +108,21 @@ Numbers below were measured on an 11:37 screencast (1890×1080, webcam overlay) 
 
 **Secrets.** Three signals, because OCR garbles the secret more often than the words around it. On a real "API Key Created" modal the plain JWT regex missed (OCR read `eyJ` as `eyl`), the entropy detector caught the 157-char token, and the UI context read at 66%. With an OCR-tolerant JWT pattern, native-resolution frames and a centre tile, the end-to-end run now reports it as `high · jwt · near "API Key"` → `block`. The first version also produced 58 false positives by running the entropy test on whitespace-stripped text; that is a regression test now. Values are always masked; the tool that warns about a leak must not be the leak.
 
-**Speakers.** Segmentation alone labelled three speakers on a one-person video (its ids are local to each 10-second window). Embedding every turn ≥ 1.5 s, average-linkage clustering at cosine 0.35, and absorbing tiny clusters brought it to one. Same-speaker similarity measured 0.47–0.53 on noisy screencast audio — lower than clean speech — so the threshold is exposed and the tool is marked experimental until multi-speaker fixtures confirm it.
+**Speakers.** Segmentation alone labelled three speakers on a one-person video (its ids are local to each 10-second window). Embedding every turn ≥ 1.5 s, average-linkage clustering at cosine 0.35, and absorbing tiny clusters brought it to one. The evaluation then showed the real failure mode: the same voice scores 0.58–0.86 against itself across positions and lengths, but 0.06–0.16 once background music is under it, so a jingle or an outro becomes its own "speaker" at any threshold. The tool stays experimental and says so in its output.
 
 **Jobs.** Client timeouts are short (Messages API ~60 s). Every long tool returns a job handle; state lives in `~/.ollos/jobs/<id>/job.json`, written atomically, with a 5-second heartbeat. On restart, orphaned jobs become `interrupted` instead of hanging forever. Small work (< 8 s estimated) runs inline and returns directly.
+
+## Evaluation
+
+`npm run eval` runs ollos against public videos and writes [eval/RESULTS.md](eval/RESULTS.md). Reference transcripts are YouTube captions, so on auto-captioned fixtures WER is an agreement rate between two recognisers, not an absolute error.
+
+| Fixture | Kind | Reference | WER | CER | Speakers (expected → found) |
+|---|---|---|---|---|---|
+| IBM Technology, *What is MCP?* (en, 3:46) | lightboard talk | professional captions | **1.4%** | 0.5% | 1 → 2 (outro music) |
+| Karine Lago, n8n assistant (pt, 10:35) | screencast | auto-captions | 8.9% | 6.1% | 1 → 1 |
+| Bolder Podcast, dev interview (pt, 5:28) | interview | auto-captions | 26.3% | 17.0% | 2 → 3 (jingles) |
+
+On the interview, half the "errors" are insertions: Whisper keeps the repetitions and fillers the auto-captions drop, and several reference words are caption mistakes ("Clash Orto" for Glassdoor, which ollos got right). Keyframes reduced the 10-minute screencast to 120 frames on 14 sheets and the talk to 51 frames on 6 sheets. Speed on that run was 0.2–0.35× real time on a loaded machine; the same model measures 1.7× in isolation. How to reproduce, and what each number means, is in [eval/README.md](eval/README.md).
 
 ## Privacy & security
 
@@ -124,24 +143,25 @@ Numbers below were measured on an 11:37 screencast (1890×1080, webcam overlay) 
 | `OLLOS_MAX_DURATION_SEC` | `14400` | media longer than this is refused (use `from`/`to`) |
 | `OLLOS_CONCURRENCY_VISION` / `_OCR` | `2` | parallel jobs per class (ASR is fixed at 1) |
 | `OLLOS_FFMPEG` / `OLLOS_FFPROBE` / `OLLOS_YTDLP` | auto | explicit binary paths |
+| `OLLOS_YTDLP_ARGS` | — | extra yt-dlp flags for every site download, allow-listed (e.g. `--no-check-certificates --js-runtimes node`) |
 
-Site downloads (YouTube, Instagram, TikTok…) need `yt-dlp` on your PATH and are best-effort: platforms change often. Local files always work.
+Site downloads (YouTube, Instagram, TikTok…) need `yt-dlp` on your PATH (or `OLLOS_YTDLP`) and are best-effort: platforms change often. Behind a corporate proxy that re-signs TLS, set `OLLOS_YTDLP_ARGS="--no-check-certificates"`. Local files always work.
 
 ## Known limits
 
 - First run downloads ~1 GB (accurate ASR). `model: "fast"` uses a 150 MB model and misreads technical terms.
 - Segment `confidence` is a heuristic (speech coverage, speaking rate, filters), not a model probability.
 - Text around 8 px in the source video is at the edge of what OCR reads: detection of a secret that small depends on the exact frame, so ollos reads several frames around each hard cut. Below that, the UI-context signal still flags the situation ("API Key Created" is read reliably).
-- `ollos_diarize` is experimental: calibrated on single-speaker material to *not* split one voice; the merge threshold (default 0.35) has not yet been tuned on real multi-speaker meetings. Heavy crosstalk is unsolved. With Zoom per-participant tracks the result is exact.
+- `ollos_diarize` is experimental. Speech with background music (intros, jingles, outros) embeds far from the same voice on clean speech and comes out as an extra speaker regardless of the merge threshold (measured in `eval/`). Heavy crosstalk is unsolved. With Zoom per-participant tracks the result is exact.
 - Site downloads depend on `yt-dlp` being installed; the standalone binary is not bundled yet.
 - Progress notifications and the MCP Tasks extension are not used yet; polling `ollos_job` is the contract for every client today.
 
 ## Roadmap
 
 - MCP Tasks extension mode when clients ship it (the job engine is protocol-agnostic already), plus `notifications/progress`
-- Multi-speaker fixtures and a published DER for `ollos_diarize`; speaker naming persisted across recordings
+- `ollos_diarize`: music-aware turn filtering (embed only turns the VAD marks as clean speech, or run a speech/music classifier first), a published DER from turn-level annotations, speaker naming persisted across recordings
 - Bundled standalone `yt-dlp` so site downloads need no Python either
-- Evaluation harness with published WER, DER, keyframe recall and secret precision/recall
+- Evaluation: DER with turn-level annotations, secret precision/recall on planted frames, retrieval metrics (hit rate, MRR, NDCG) for `ollos_search`
 
 ## Credits
 
