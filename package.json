@@ -1,0 +1,81 @@
+{
+  "name": "ollos-mcp",
+  "version": "0.1.0",
+  "description": "Ollos gives AI agents eyes and ears. Local, offline transcription, speaker turns, keyframes, on-screen text and a pre-publish review for any audio or video. MCP server, CLI and library. Node only, no Python.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "whisper",
+    "transcription",
+    "diarization",
+    "video",
+    "audio",
+    "ocr",
+    "keyframes",
+    "claude",
+    "agent"
+  ],
+  "license": "Apache-2.0",
+  "author": "Kelvin Biffi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kelvinbiffi/ollos-mcp.git"
+  },
+  "homepage": "https://github.com/kelvinbiffi/ollos-mcp#readme",
+  "bugs": "https://github.com/kelvinbiffi/ollos-mcp/issues",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "ollos-mcp": "dist/mcp/bin.js",
+    "ollos": "dist/cli/bin.js"
+  },
+  "main": "dist/core/index.js",
+  "types": "dist/core/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "assets",
+    "skills",
+    "server.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev:mcp": "tsx src/mcp/bin.ts",
+    "dev:cli": "tsx src/cli/bin.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "warmup": "tsx src/cli/bin.ts warmup",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "ffmpeg-static": "^5.3.0",
+    "sharp": "^0.34.0",
+    "tesseract.js": "^6.0.1",
+    "zod": "^3.25.0"
+  },
+  "optionalDependencies": {
+    "ffprobe-static": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

@@ -1,0 +1,26 @@
+# Frases que o Whisper emite em silêncio ou ruído, em português. Uma por linha, comparação exata após normalizar pontuação.
+# Ponto de partida: lista curada do projeto Vexa (Apache-2.0, github.com/Vexa-ai/vexa), acrescida de observações próprias.
+# Gere a lista específica do seu modelo com: ollos harvest --lang pt
+e aí
+é isso aí
+é isso aí galera
+obrigado
+obrigada
+obrigado por assistir
+obrigado por assistir até o final
+até a próxima
+até o próximo vídeo
+tchau
+tchau tchau
+legendas pela comunidade amara org
+legendas por
+inscreva-se no canal
+inscreva se no canal
+não se esqueça de se inscrever
+deixe o seu like
+eu não sei o que é isso
+eu não sei o que você está falando
+então me lembre-se me lembre-se me lembre-se
+música
+aplausos
+risos

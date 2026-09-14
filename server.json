@@ -1,0 +1,24 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.kelvinbiffi/ollos-mcp",
+  "description": "Eyes and ears for AI agents: local, offline transcription, keyframes, on-screen text and a pre-publish review of any audio or video. Node only.",
+  "repository": {
+    "url": "https://github.com/kelvinbiffi/ollos-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "ollos-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        { "name": "OLLOS_HOME", "description": "Where jobs, cache and models live. Default ~/.ollos", "isRequired": false },
+        { "name": "OLLOS_OFFLINE", "description": "Set to 1 to forbid any network access (models must be warmed up first)", "isRequired": false }
+      ]
+    }
+  ]
+}

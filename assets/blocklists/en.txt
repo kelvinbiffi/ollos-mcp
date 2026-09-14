@@ -1,0 +1,19 @@
+# Known Whisper hallucinations on silence/noise, English. Exact match after punctuation normalisation.
+# Seeded from the Vexa project's production blocklist (Apache-2.0, github.com/Vexa-ai/vexa).
+thank you
+thanks for watching
+thanks for watching and i'll see you next time
+thank you so much for joining us
+thank you for watching
+see you next time
+see you in the next video
+subtitles by the amara org community
+subtitles by
+please subscribe
+don't forget to subscribe
+like and subscribe
+bye
+bye bye
+music
+applause
+laughter

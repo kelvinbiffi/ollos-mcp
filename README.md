@@ -1,0 +1,152 @@
+# ollos-mcp
+
+**Eyes and ears for AI agents.** Local, offline transcription, keyframes, on-screen text and a pre-publish review of any audio, video or image — as an MCP server, a CLI and a Node library. No Python, no cloud, no API key.
+
+> 11 minutes of screencast become 14 contact sheets and 3 KB of text. And it tells you if your API key is visible at 2:50.
+
+```bash
+npx ollos-mcp            # MCP server on stdio
+npx ollos review talk.mp4
+```
+
+*Ollos* is Galician for *eyes*.
+
+---
+
+## Why
+
+Agents can't hear or watch. Today you either pay a transcription API, install a Python pipeline, or paste frames by hand. Ollos runs Whisper, speaker segmentation, perceptual-hash keyframing and OCR **in Node, through ONNX Runtime**, on your machine. The file never leaves it.
+
+It was built for one workflow first — reviewing a screen recording before publishing — and grew into the general case: meetings, lessons, podcasts, downloaded videos.
+
+## Install
+
+Node 20+. `npm install` brings its own ffmpeg (`ffmpeg-static`); a system ffmpeg is used if present.
+
+**Claude Code / Cursor / any MCP client** — add to `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "ollos": { "command": "npx", "args": ["-y", "ollos-mcp"] }
+  }
+}
+```
+
+**CLI**
+
+```bash
+npm i -g ollos-mcp
+ollos warmup            # download models once (~1 GB for the accurate ASR model)
+ollos doctor            # check ffmpeg, models, disk
+```
+
+Models download on first use into `~/.ollos/models`. Set `OLLOS_OFFLINE=1` afterwards to forbid all network access.
+
+## Tools
+
+Ten tools, one per distinct contract. Long work never blocks: it returns a `jobId` you poll.
+
+| Tool | What it does |
+|---|---|
+| `ollos_probe` | What the file really is: kind, duration, resolution, aspect (and which platforms it fits), codecs, tracks. Detects Zoom recording folders. Instant. |
+| `ollos_transcribe` | Whisper transcription with timestamps. Voice-activity gating skips silence; known hallucinations are filtered; `vocabulary` fixes domain terms. |
+| `ollos_keyframes` | The frames that carry information, packed into 3×3 timestamped contact sheets. Works on screen recordings where scene detection sees nothing. |
+| `ollos_read_screen` | OCR of on-screen text plus a **secret scan**: API keys, JWTs, `.env` lines, private deployment URLs. Always masked. |
+| `ollos_review` | Verdict before publishing: loudness vs platform, silences to cut, aspect ratio, secrets on screen. |
+| `ollos_frames` | Look at a sheet or a single frame as an image. |
+| `ollos_diarize` | Who spoke when: pyannote segmentation + WeSpeaker embeddings + clustering, with an 8-second voice clip per speaker so you can name them by ear. Uses Zoom per-participant tracks directly when present. *Experimental — see limits.* |
+| `ollos_search` | Hybrid BM25 + multilingual-embedding search over everything transcribed and read, fused by reciprocal rank. Returns passages with timestamps, never whole transcripts. |
+| `ollos_job` · `ollos_cancel` | Poll and stop jobs. Jobs live on disk and survive a server restart. |
+
+Results are **concise by default** and point to MCP resources (`ollos://jobs/<id>/transcript`, `/ocr`, `/report`, `/sheet/<n>`) for the full artifacts, so a 2-hour meeting doesn't flood the context window. Pass `format: "detailed"` when you want it all.
+
+## CLI
+
+```bash
+ollos probe recording.mp4
+ollos transcribe meeting.mp4 --lang pt --vocab "Claude Code,n8n,webhook"
+ollos keyframes lesson.mp4 --sensitivity normal --max-frames 120
+ollos read-screen demo.mp4
+ollos review episode.mp4 --platform youtube     # exit 3 = block, 1 = warn, 0 = ok
+ollos jobs · ollos job <id> · ollos events <id> · ollos cancel <id>
+```
+
+Add `--json` for machine output.
+
+## Library
+
+```ts
+import { createOllos } from 'ollos-mcp'
+
+const ollos = createOllos()
+const { job } = await ollos.transcribe({ source: 'talk.mp4', language: 'pt', vocabulary: ['MCP'] })
+const { result } = await ollos.wait(job.id)
+console.log(result.segments[0])
+```
+
+`ollos-mcp/core` has no MCP dependency: use it from n8n, a script, a Lambda.
+
+## How it works, and what was measured
+
+Numbers below were measured on an 11:37 screencast (1890×1080, webcam overlay) on a 16-core laptop. They are why the design is what it is.
+
+**Transcription.** Silero VAD marks speech; Whisper only sees speech (fewer hallucinations, 20–40% less work on meetings). `whisper-large-v3-turbo` at 1.7× real time got "MCP servers", "n8n", "VS Code" right where `whisper-base` (5.4×) got all three wrong. The one phonetic miss left ("Cloud Code") is fixed by `vocabulary`. Two Whisper sessions in parallel measured **slower** than one (0.6–1.0×), so ASR concurrency is 1 and speed comes from VAD and from running vision in parallel instead.
+
+**Anti-hallucination.** Whisper doesn't go quiet on silence — it invents "Obrigado." and "Subtitles by the Amara.org community". Four filters, from production experience shared by the Vexa project: exact blocklist per language, repetition-loop collapse, no-speech gate, impossible speaking rate.
+
+**Keyframes.** ffmpeg scene detection at 0.3 kept **4 frames in 11 minutes** of screencast; `mpdecimate` removed **0%** (the cursor and streaming text change every pixel). A 64-bit perceptual hash (dHash) at Hamming ≥ 6 kept 20% — one frame every 5–8 s — and that is the default. Hard cuts, transcript anchors and a 20-second floor fill the gaps.
+
+**OCR.** Tesseract on a full 1890-px frame missed an on-screen URL entirely; on a 3× upscaled tile it read it whole at 90% confidence in 2.8 s. So OCR runs per tile, and URL-like text is re-joined when OCR splits it ("up. railway .app").
+
+**Secrets.** Three signals, because OCR garbles the secret more often than the words around it. On a real "API Key Created" modal the plain JWT regex missed (OCR read `eyJ` as `eyl`), the entropy detector caught the 157-char token, and the UI context read at 66%. With an OCR-tolerant JWT pattern, native-resolution frames and a centre tile, the end-to-end run now reports it as `high · jwt · near "API Key"` → `block`. The first version also produced 58 false positives by running the entropy test on whitespace-stripped text; that is a regression test now. Values are always masked; the tool that warns about a leak must not be the leak.
+
+**Speakers.** Segmentation alone labelled three speakers on a one-person video (its ids are local to each 10-second window). Embedding every turn ≥ 1.5 s, average-linkage clustering at cosine 0.35, and absorbing tiny clusters brought it to one. Same-speaker similarity measured 0.47–0.53 on noisy screencast audio — lower than clean speech — so the threshold is exposed and the tool is marked experimental until multi-speaker fixtures confirm it.
+
+**Jobs.** Client timeouts are short (Messages API ~60 s). Every long tool returns a job handle; state lives in `~/.ollos/jobs/<id>/job.json`, written atomically, with a 5-second heartbeat. On restart, orphaned jobs become `interrupted` instead of hanging forever. Small work (< 8 s estimated) runs inline and returns directly.
+
+## Privacy & security
+
+- Nothing is uploaded. Network is used only to download models once and to fetch a source URL you pass.
+- URL fetching refuses private and loopback addresses (SSRF) unless `OLLOS_ALLOW_PRIVATE=1`.
+- Transcripts and on-screen text are returned inside `<untrusted-content>` — they are data, not instructions. The bundled skill says the same to the agent.
+- Secret findings are masked in results, logs and events.
+- Recording other people requires their consent where you live.
+
+## Configuration
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `OLLOS_HOME` | `~/.ollos` | jobs, cache, models |
+| `OLLOS_OFFLINE` | `0` | `1` forbids network; models must be warmed up |
+| `OLLOS_ALLOW_PRIVATE` | `0` | allow fetching from private networks |
+| `OLLOS_MAX_DOWNLOAD_MB` | `2048` | download cap |
+| `OLLOS_MAX_DURATION_SEC` | `14400` | media longer than this is refused (use `from`/`to`) |
+| `OLLOS_CONCURRENCY_VISION` / `_OCR` | `2` | parallel jobs per class (ASR is fixed at 1) |
+| `OLLOS_FFMPEG` / `OLLOS_FFPROBE` / `OLLOS_YTDLP` | auto | explicit binary paths |
+
+Site downloads (YouTube, Instagram, TikTok…) need `yt-dlp` on your PATH and are best-effort: platforms change often. Local files always work.
+
+## Known limits
+
+- First run downloads ~1 GB (accurate ASR). `model: "fast"` uses a 150 MB model and misreads technical terms.
+- Segment `confidence` is a heuristic (speech coverage, speaking rate, filters), not a model probability.
+- Text around 8 px in the source video is at the edge of what OCR reads: detection of a secret that small depends on the exact frame, so ollos reads several frames around each hard cut. Below that, the UI-context signal still flags the situation ("API Key Created" is read reliably).
+- `ollos_diarize` is experimental: calibrated on single-speaker material to *not* split one voice; the merge threshold (default 0.35) has not yet been tuned on real multi-speaker meetings. Heavy crosstalk is unsolved. With Zoom per-participant tracks the result is exact.
+- Site downloads depend on `yt-dlp` being installed; the standalone binary is not bundled yet.
+- Progress notifications and the MCP Tasks extension are not used yet; polling `ollos_job` is the contract for every client today.
+
+## Roadmap
+
+- MCP Tasks extension mode when clients ship it (the job engine is protocol-agnostic already), plus `notifications/progress`
+- Multi-speaker fixtures and a published DER for `ollos_diarize`; speaker naming persisted across recordings
+- Bundled standalone `yt-dlp` so site downloads need no Python either
+- Evaluation harness with published WER, DER, keyframe recall and secret precision/recall
+
+## Credits
+
+Built on [transformers.js](https://github.com/huggingface/transformers.js) and the [onnx-community](https://huggingface.co/onnx-community) model ports, [tesseract.js](https://github.com/naptha/tesseract.js), [sharp](https://sharp.pixelplumbing.com/) and ffmpeg. Hallucination blocklists seeded from [Vexa](https://github.com/Vexa-ai/vexa) (Apache-2.0). Scene-aware keyframing was pioneered for agents by [claude-real-video](https://github.com/HUANGCHIHHUNGLeo/claude-real-video); ollos takes a different angle (review, speakers, Node) and owes it the contact-sheet idea.
+
+## License
+
+Apache-2.0 — © 2026 Kelvin Biffi

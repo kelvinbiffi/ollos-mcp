@@ -1,0 +1,27 @@
+# build
+dist/
+*.tsbuildinfo
+
+# deps
+node_modules/
+
+# runtime data (never commit jobs, cache or models)
+.ollos/
+*.onnx
+*.traineddata
+*.traineddata.gz
+
+# tooling
+.vitest/
+coverage/
+.eslintcache
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# local env
+.env
+.env.*
+
+# test scratch
+.ollos-test*/
