@@ -34,6 +34,7 @@ First release. Everything below was measured on real media before being made the
 - Text below ~8 px in the source video is at the edge of OCR; several frames around each cut are read to compensate.
 - Site downloads require `yt-dlp` on `PATH` or `OLLOS_YTDLP`; the standalone binary is not bundled.
 - No MCP Tasks extension or progress notifications yet; poll `ollos_job`.
+- No memory cap and no idle unloading: the default ASR model keeps ~4.3 GB resident until the server exits (README, *Memory limits*).
 
 [Unreleased]: https://github.com/kelvinbiffi/ollos-mcp/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/kelvinbiffi/ollos-mcp/releases/tag/v0.1.0

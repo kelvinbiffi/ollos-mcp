@@ -142,7 +142,29 @@ Minimums that follow from this: **8 GB of RAM** for the default model (4 GB is e
 
 Models stay loaded for the life of the server process; nothing is unloaded on idle yet. The peak above used to be ~10 GB: transformers.js' file cache streamed the 2.4 GB encoder weights into JavaScript buffers that nothing read, on top of ONNX Runtime's own memory-mapped copy. ollos now hands model paths to ONNX Runtime directly (see `PathCache` in `src/core/models.ts`). Set `OLLOS_DEBUG_MEM=1` to stamp every job event with process memory and read them with `ollos events <id>`.
 
-There is no memory cap setting today. What exists: `OLLOS_MAX_DURATION_SEC` (refuse long media), `from`/`to` (work on a window), `OLLOS_CONCURRENCY_*` (parallel jobs per class; ASR is always 1), and `model: "fast"` for machines with little RAM. `ollos doctor` reports free memory against the default model's needs.
+### Memory limits
+
+**There is no memory cap setting today, and models are never unloaded while the server process lives.** Once `ollos_transcribe` has run with the default model, the process keeps ~4.3 GB until it exits; add search and it keeps ~5.1 GB. This is a deliberate trade for speed (a cold load of the default model costs 50–60 s) and the honest state of 0.1.0.
+
+What you can control now:
+
+| Lever | Effect |
+|---|---|
+| `model: "fast"` per call | ~1.9 GB instead of ~4.3 GB; 3× faster; misreads technical terms |
+| `from` / `to` on any tool | bounds the audio decoded and the frames extracted; memory for PCM and frames scales with the window, not the file |
+| `OLLOS_MAX_DURATION_SEC` (default 4 h) | refuses media longer than this with a hint to use a window |
+| `OLLOS_CONCURRENCY_VISION` / `_OCR` (default 2) | fewer parallel ffmpeg/Tesseract workers; ASR is always 1 |
+| `OLLOS_MAX_DOWNLOAD_MB` (default 2048) | caps a fetched source file |
+| Restart the server | the only way to release model memory today |
+| `ollos doctor` | shows free RAM and cores against the measured needs before you start |
+| `OLLOS_DEBUG_MEM=1` | stamps every job event with `rss`, `heap` and `arrayBuffers` (MB); read with `ollos events <id>` |
+
+Node's own `--max-old-space-size` does **not** help: the weights live in ONNX Runtime's native memory, outside the V8 heap.
+
+Planned, in order of value (see Roadmap):
+
+1. **Idle unloading** — release a model after N minutes without a job (`OLLOS_MODEL_IDLE_MIN`), accepting the 50–60 s reload on the next call. Cheap to build; the pipelines already load lazily.
+2. **A memory guard** — `OLLOS_MAX_MEMORY_MB`: before loading a model, compare its measured peak with the cap and the free RAM; refuse with a clear error, or downgrade to `model: "fast"` when `OLLOS_MEMORY_FALLBACK=fast`. The catalogue in `src/core/models.ts` already carries the sizes this needs.
 
 ## Privacy & security
 
@@ -179,6 +201,7 @@ Site downloads (YouTube, Instagram, TikTok…) need `yt-dlp` on your PATH (or `O
 
 ## Roadmap
 
+- Memory: idle unloading of models (`OLLOS_MODEL_IDLE_MIN`) and a memory guard (`OLLOS_MAX_MEMORY_MB` with optional fallback to `model: "fast"`); see *Memory limits*
 - MCP Tasks extension mode when clients ship it (the job engine is protocol-agnostic already), plus `notifications/progress`
 - `ollos_diarize`: music-aware turn filtering (embed only turns the VAD marks as clean speech, or run a speech/music classifier first), a published DER from turn-level annotations, speaker naming persisted across recordings
 - Bundled standalone `yt-dlp` so site downloads need no Python either
