@@ -1,6 +1,6 @@
 // Probe: how consistent are speaker embeddings for one voice across positions, lengths and acoustic conditions?
 // Usage: npx tsx scripts/probe-speaker-embeddings.mts  (needs eval/fixtures.local.json from `npm run eval:fetch`)
-// Measured 2026-09-14 on the IBM fixture: same voice 0.58–0.86 (2 s cuts included); the same voice over background
+// Measured 2026-09-14 on the IBM fixture: same voice 0.51–0.86 (2 s cuts included); the same voice over background
 // music (44–48 s, 212–226 s outro) 0.06–0.16 against clean speech and 0.67 between the two music regions.
 import fs from 'node:fs'
 import { loadConfig } from '../src/core/config.js'

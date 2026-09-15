@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { OllosConfig } from '../config.js'
-import { Cache, hashOf } from '../cache/cache.js'
+import { adoptArtifact, Cache, hashOf } from '../cache/cache.js'
 import { OllosError } from '../errors.js'
 import type { JobContext } from '../jobs/types.js'
 import { decodePcm16k } from '../media/decode.js'
@@ -13,7 +13,7 @@ import type { Segment, TranscribeResult } from './transcribe.js'
 
 export interface DiarizeParams {
   source: string
-  /** Cosine similarity above which two turns are the same person. Default 0.40 (experimental; calibrate on your recordings). */
+  /** Cosine similarity above which two turns are the same person. Default 0.35 (experimental; calibrate on your recordings). */
   similarityThreshold?: number
   maxSpeakers?: number
   minSpeakers?: number
@@ -71,9 +71,17 @@ export async function runDiarize(params: DiarizeParams, ctx: JobContext, config:
   const cache = new Cache(config)
   const key = hashOf(src.identity, threshold, params.maxSpeakers ?? 8, params.minSpeakers ?? 1, offset, params.toSec ?? 0)
   const hit = cache.getJSON<DiarizeResult>('diarize', key)
-  if (hit && !params.transcript) {
+  // a hit is only usable while the earlier job's files still exist (gc may have removed them); the files are then
+  // linked into this job so ollos://jobs/<this id>/speakers resolves
+  if (hit && !params.transcript && fs.existsSync(hit.artifacts.json) && hit.speakers.every((s) => !s.voiceClip || fs.existsSync(s.voiceClip))) {
     ctx.event({ stage: 'cache', event: 'info', message: 'diarization served from cache' })
-    return { ...hit, cached: true }
+    const voicesDir = path.join(ctx.artifactsDir, 'voices')
+    return {
+      ...hit,
+      speakers: hit.speakers.map((s) => (s.voiceClip ? { ...s, voiceClip: adoptArtifact(s.voiceClip, voicesDir) } : s)),
+      artifacts: { json: adoptArtifact(hit.artifacts.json, ctx.artifactsDir) },
+      cached: true,
+    }
   }
 
   let turns: Turn[] = []

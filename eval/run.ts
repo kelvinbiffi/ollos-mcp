@@ -2,7 +2,7 @@
  * Evaluation runner. Measures ollos against public reference material and writes eval/RESULTS.md.
  *
  *   npx tsx eval/run.ts                # all fixtures
- *   npx tsx eval/run.ts ibm-mcp        # one fixture by id
+ *   npx tsx eval/run.ts ibm-what-is-mcp  # one fixture by id
  *
  * Inputs
  *   eval/fixtures.json        public metadata: YouTube URL, language, expected speakers, kind

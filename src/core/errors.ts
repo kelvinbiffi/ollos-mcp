@@ -21,6 +21,7 @@ export type OllosErrorCode =
   | 'JOB_NOT_CANCELLABLE'
   | 'INVALID_ARGUMENT'
   | 'CANCELLED'
+  | 'INTERRUPTED'
   | 'INTERNAL'
 
 export class OllosError extends Error {

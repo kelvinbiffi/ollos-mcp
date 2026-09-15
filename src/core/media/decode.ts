@@ -33,11 +33,3 @@ export async function decodePcm16k(file: string, config: OllosConfig, opts: Wind
   new Uint8Array(ab).set(stdout.subarray(0, bytes))
   return new Float32Array(ab)
 }
-
-export function samplesToSec(n: number): number {
-  return n / ASR_SAMPLE_RATE
-}
-
-export function secToSamples(s: number): number {
-  return Math.round(s * ASR_SAMPLE_RATE)
-}

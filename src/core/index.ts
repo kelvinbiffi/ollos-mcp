@@ -62,7 +62,7 @@ export class Ollos {
   review(params: ReviewParams, opts?: { inline?: boolean }) {
     return this.engine.submit<ReviewParams, ReviewResult>('review', params, opts)
   }
-  /** Experimental until the speaker threshold is calibrated on multi-speaker fixtures. */
+  /** Experimental: speech over music clusters as its own speaker; see README limits. */
   diarize(params: DiarizeParams, opts?: { inline?: boolean }) {
     return this.engine.submit<DiarizeParams, DiarizeResult>('diarize', params, opts)
   }

@@ -112,13 +112,25 @@ export function run(bin: string, args: string[], opts: RunOptions = {}): Promise
   })
 }
 
-/** Parse "00:01:30.5", "1:30", "90", "90.25" into seconds. */
-export function parseTime(t: string | number | undefined): number | undefined {
+const TIME_HINT = 'Use seconds as a number (90) or a string ("90", "1:30", "0:01:30.5").'
+
+/**
+ * Parse a time given as seconds (number) or as "90", "90.25", "1:30", "00:01:30.5" into seconds.
+ * The single parser for MCP, CLI and pipelines: one accepted grammar, one error message.
+ * Numbers are validated too — `Number('abc')` is NaN and would otherwise become an ffmpeg `-ss NaN`.
+ */
+export function parseTime(t: string | number | undefined | null): number | undefined {
   if (t === undefined || t === null || t === '') return undefined
-  if (typeof t === 'number') return t
-  const parts = t.trim().split(':').map(Number)
-  if (parts.some((n) => !Number.isFinite(n))) throw new OllosError('INVALID_ARGUMENT', `invalid time "${t}"`, { hint: 'Use seconds ("90"), mm:ss ("1:30") or hh:mm:ss.ms ("0:01:30.5").' })
-  return parts.reduce((acc, n) => acc * 60 + n, 0)
+  if (typeof t === 'number') {
+    if (!Number.isFinite(t) || t < 0) throw new OllosError('INVALID_ARGUMENT', `invalid time ${String(t)}`, { hint: TIME_HINT })
+    return t
+  }
+  const parts = t.trim().split(':')
+  // every field must be a plain non-negative decimal: Number('') is 0 and Number(' ') is 0, so "1::30" or "1: 30" would silently parse
+  if (parts.length === 0 || parts.length > 3 || parts.some((p) => !/^\d+(\.\d+)?$/.test(p))) {
+    throw new OllosError('INVALID_ARGUMENT', `invalid time "${t}"`, { hint: TIME_HINT })
+  }
+  return parts.map(Number).reduce((acc, n) => acc * 60 + n, 0)
 }
 
 export function fmtTime(sec: number): string {

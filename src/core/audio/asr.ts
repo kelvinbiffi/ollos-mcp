@@ -44,7 +44,7 @@ export function loadAsr(choice: AsrModelChoice | undefined, config: OllosConfig,
       loaded.delete(id)
       const msg = e instanceof Error ? e.message : String(e)
       if (config.offline || /ENOTFOUND|fetch failed|ECONN/i.test(msg)) {
-        throw new OllosError('MODEL_MISSING_OFFLINE', `model ${id} is not available locally and could not be downloaded`, { hint: 'Run "ollos warmup" once while online.', cause: e })
+        throw new OllosError('MODEL_MISSING_OFFLINE', `model ${id} is not available locally and could not be downloaded`, { hint: 'Run "ollos warmup" once while online ("ollos warmup --all" also fetches the fast model).', cause: e })
       }
       throw new OllosError('MODEL_LOAD_FAILED', `could not load ${id}: ${msg}`, { cause: e })
     }) as Promise<AutomaticSpeechRecognitionPipeline>

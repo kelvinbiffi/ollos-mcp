@@ -81,7 +81,9 @@ export async function runReview(params: ReviewParams, ctx: JobContext, config: O
       const l = await measureLoudness(src.path, config, { ...window, signal: ctx.signal })
       measurements.loudness = l
       const delta = l.integratedLufs - platform.targetLufs
-      const sev: Severity = Math.abs(delta) <= 2 ? 'ok' : Math.abs(delta) <= 6 ? 'warn' : 'warn'
+      // Within ±2 dB the platform's own normalisation is inaudible; anything further is a warning, never a block:
+      // only a high-confidence secret on screen blocks, because loudness is fixable after upload and a leaked key is not.
+      const sev: Severity = Math.abs(delta) <= 2 ? 'ok' : 'warn'
       findings.push({
         check: 'loudness',
         severity: sev,

@@ -34,7 +34,7 @@ const MODEL_BINARY = /\.onnx(_data(_\d+)?)?$/i
  * nobody ever reads. The stream still flows to the end, so the entire file sits in JavaScript ArrayBuffers until
  * the garbage collector gets to it. Measured with whisper-large-v3-turbo: 4.86 GB of ArrayBuffers (2× the 2.43 GB
  * encoder weights) appearing over ~5 s after the model loaded, on top of ONNX Runtime's own copy — peak RSS ~10 GB
- * instead of ~5 GB. Returning a plain string makes transformers.js pass the path straight to ONNX Runtime, which
+ * instead of ~4.3 GB. Returning a plain string makes transformers.js pass the path straight to ONNX Runtime, which
  * memory-maps it. Small files (config, tokenizer, preprocessor JSON) are still served as a `Response` because
  * `getModelJSON` decodes a buffer, not a path. Misses are downloaded to a temp file and renamed, like FileCache.
  */

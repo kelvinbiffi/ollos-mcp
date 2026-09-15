@@ -9,7 +9,7 @@ import { ensureDir, exists, readJSON, writeJSONAtomic } from '../paths.js'
 /**
  * Hybrid search over what ollos heard and read: BM25 for exact names, acronyms and numbers ("n8n", "401"),
  * multilingual embeddings for meaning, fused by reciprocal rank. One index per job, on disk.
- * This is retrieval with its own metrics (hit rate, recall@k, MRR, NDCG) — see eval/.
+ * This is retrieval with its own metrics (hit rate, recall@k, MRR, NDCG); a retrieval eval under eval/ is planned, not written yet.
  */
 export interface Doc {
   id: string

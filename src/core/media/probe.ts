@@ -1,4 +1,5 @@
 import { resolveBinaries, run } from './ffmpeg.js'
+import { PLATFORMS } from './measure.js'
 import { OllosError } from '../errors.js'
 import type { OllosConfig } from '../config.js'
 
@@ -25,24 +26,29 @@ export interface MediaInfo {
   audioTracks: number
 }
 
-const KNOWN_RATIOS: Array<[string, number, string[]]> = [
-  ['16:9', 16 / 9, ['youtube', 'linkedin']],
-  ['9:16', 9 / 16, ['tiktok', 'instagram-reels', 'youtube-shorts']],
-  ['4:3', 4 / 3, []],
-  ['1:1', 1, ['instagram-feed']],
-  ['4:5', 4 / 5, ['instagram-feed']],
-  ['21:9', 21 / 9, []],
-  ['7:4', 7 / 4, []],
+const KNOWN_RATIOS: Array<[string, number]> = [
+  ['16:9', 16 / 9],
+  ['9:16', 9 / 16],
+  ['4:3', 4 / 3],
+  ['1:1', 1],
+  ['4:5', 4 / 5],
+  ['21:9', 21 / 9],
+  ['7:4', 7 / 4],
 ]
+
+/** Platform ids whose preset accepts this ratio — the same ids `ollos_review.platform` takes, so an agent can chain probe → review without a mapping table. */
+function platformsFitting(ratio: string): string[] {
+  return Object.values(PLATFORMS).filter((p) => p.aspects.includes(ratio)).map((p) => p.id)
+}
 
 export function describeAspect(width: number, height: number): AspectInfo {
   const decimal = width / height
-  let best: [string, number, string[]] = KNOWN_RATIOS[0]!
+  let best: [string, number] = KNOWN_RATIOS[0]!
   for (const r of KNOWN_RATIOS) if (Math.abs(r[1] - decimal) < Math.abs(best[1] - decimal)) best = r
   const exact = Math.abs(best[1] - decimal) < 0.005
   const ratio = exact ? best[0] : `${width}:${height}`
   const in16x9: AspectInfo['in16x9'] = Math.abs(decimal - 16 / 9) < 0.005 ? 'fits' : decimal < 16 / 9 ? 'pillarbox' : 'letterbox'
-  return { ratio, decimal: Number(decimal.toFixed(4)), fits: exact ? best[2] : [], in16x9 }
+  return { ratio, decimal: Number(decimal.toFixed(4)), fits: exact ? platformsFitting(ratio) : [], in16x9 }
 }
 
 interface FfprobeOutput {

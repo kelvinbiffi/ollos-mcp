@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { OllosConfig } from '../config.js'
-import { Cache, hashOf } from '../cache/cache.js'
+import { adoptArtifact, Cache, hashOf } from '../cache/cache.js'
 import { decodePcm16k, ASR_SAMPLE_RATE, type Window } from '../media/decode.js'
 import { fmtTime } from '../media/ffmpeg.js'
 import { assertKindSupports, resolveSource, type ResolvedSource } from '../source/resolve.js'
@@ -21,6 +21,8 @@ export interface TranscribeParams {
   toSec?: number
   /** Which audio track of a multi-track file (Zoom per-participant). */
   audioTrack?: number
+  /** Silero speech probability above which audio counts as speech. Default 0.5; lower it for quiet or music-backed voices. */
+  vadThreshold?: number
 }
 
 export interface Segment {
@@ -92,11 +94,13 @@ export async function runTranscribe(params: TranscribeParams, ctx: JobContext, c
 
   const modelId = asrModelId(params.model, config)
   const cache = new Cache(config)
-  const key = hashOf(src.identity, modelId, params.language ?? 'auto', params.vocabulary ?? [], params.fromSec ?? 0, params.toSec ?? 0, params.audioTrack ?? 0)
+  // vadThreshold joins the key only when set, so transcripts cached before it existed stay valid
+  const key = hashOf(src.identity, modelId, params.language ?? 'auto', params.vocabulary ?? [], params.fromSec ?? 0, params.toSec ?? 0, params.audioTrack ?? 0, ...(params.vadThreshold !== undefined ? [params.vadThreshold] : []))
   const hit = cache.getJSON<TranscribeResult>('transcript', key)
-  if (hit && fs.existsSync(hit.artifacts.json)) {
+  if (hit && Object.values(hit.artifacts).every((f) => fs.existsSync(f))) {
     ctx.event({ stage: 'cache', event: 'info', message: 'transcript served from cache' })
-    return { ...hit, cached: true }
+    // link the earlier job's files into this job so ollos://jobs/<this id>/transcript resolves
+    return { ...hit, artifacts: { json: adoptArtifact(hit.artifacts.json, ctx.artifactsDir), txt: adoptArtifact(hit.artifacts.txt, ctx.artifactsDir), srt: adoptArtifact(hit.artifacts.srt, ctx.artifactsDir) }, cached: true }
   }
 
   const window: Window = { fromSec: params.fromSec, toSec: params.toSec }
@@ -108,10 +112,10 @@ export async function runTranscribe(params: TranscribeParams, ctx: JobContext, c
 
   ctx.progress('vad', 0.06, 'detecting speech')
   const tv = Date.now()
-  const vad = await detectSpeech(pcm, config)
-  ctx.event({ stage: 'vad', event: 'end', durationMs: Date.now() - tv, data: { engine: vad.engine, speechSec: Number(vad.speechSec.toFixed(1)), totalSec: Number(totalSec.toFixed(1)) } })
+  const vad = await detectSpeech(pcm, config, { threshold: params.vadThreshold })
+  ctx.event({ stage: 'vad', event: 'end', durationMs: Date.now() - tv, data: { engine: vad.engine, speechSec: Number(vad.speechSec.toFixed(1)), totalSec: Number(totalSec.toFixed(1)), threshold: params.vadThreshold ?? 0.5 } })
   const windows = planWindows(vad.regions)
-  if (windows.length === 0) throw new OllosError('PIPELINE_EMPTY_OUTPUT', 'no speech detected in the selected audio', { details: { vadEngine: vad.engine }, hint: 'The audio may be music-only or silent. Lower the VAD threshold or check the track.' })
+  if (windows.length === 0) throw new OllosError('PIPELINE_EMPTY_OUTPUT', 'no speech detected in the selected audio', { details: { vadEngine: vad.engine, vadThreshold: params.vadThreshold ?? 0.5 }, hint: 'The audio may be music-only or silent. Lower vadThreshold (default 0.5, try 0.3) or check the audioTrack.' })
 
   ctx.progress('asr', 0.08, `loading ${modelId}`)
   const segments: Segment[] = []

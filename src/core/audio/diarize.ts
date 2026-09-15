@@ -19,16 +19,42 @@ interface LocalSegment {
   confidence: number
 }
 
+type ProgressCb = (ev: { status?: string; file?: string; progress?: number }) => void
+
+/** `ollos warmup --all` and the pipelines share these loaders, so what warmup fetches is exactly what diarize will ask for offline. */
+function loadOpts(onProgress?: (msg: string) => void): { progress_callback?: ProgressCb } {
+  if (!onProgress) return {}
+  return { progress_callback: (ev) => ev.status === 'progress' && ev.file && onProgress(`downloading ${ev.file} ${Math.round(ev.progress ?? 0)}%`) }
+}
+
+function modelLoadError(id: string, config: OllosConfig, e: unknown): OllosError {
+  return new OllosError('MODEL_LOAD_FAILED', `could not load ${id}: ${e instanceof Error ? e.message : String(e)}`, { cause: e, hint: config.offline ? 'Run "ollos warmup --all" while online; plain "ollos warmup" fetches only the ASR and VAD models.' : undefined })
+}
+
+export async function loadSegmentationModel(config: OllosConfig, onProgress?: (msg: string) => void) {
+  configureModelRuntime(config)
+  const id = config.models.segmentation
+  const [processor, model] = await Promise.all([AutoProcessor.from_pretrained(id, loadOpts(onProgress) as never), AutoModelForAudioFrameClassification.from_pretrained(id, loadOpts(onProgress) as never)]).catch((e: unknown) => {
+    throw modelLoadError(id, config, e)
+  })
+  return { processor, model }
+}
+
+export async function loadSpeakerModel(config: OllosConfig, onProgress?: (msg: string) => void) {
+  configureModelRuntime(config)
+  const id = config.models.speaker
+  const [fe, model] = await Promise.all([AutoFeatureExtractor.from_pretrained(id, loadOpts(onProgress) as never), AutoModel.from_pretrained(id, loadOpts(onProgress) as never)]).catch((e: unknown) => {
+    throw modelLoadError(id, config, e)
+  })
+  return { fe, model }
+}
+
 /**
  * Step 1 — segmentation. pyannote-segmentation-3.0 labels speakers *locally* (its ids reset every window),
  * so on a one-person video it happily reports three speakers. Measured: 310× real time in Node.
  */
 export async function segmentSpeakers(pcm: Float32Array, config: OllosConfig, signal?: AbortSignal): Promise<LocalSegment[]> {
-  configureModelRuntime(config)
-  const id = config.models.segmentation
-  const [processor, model] = await Promise.all([AutoProcessor.from_pretrained(id), AutoModelForAudioFrameClassification.from_pretrained(id)]).catch((e: unknown) => {
-    throw new OllosError('MODEL_LOAD_FAILED', `could not load ${id}: ${e instanceof Error ? e.message : String(e)}`, { cause: e, hint: config.offline ? 'Run "ollos warmup --all" while online.' : undefined })
-  })
+  const { processor, model } = await loadSegmentationModel(config)
   const out: LocalSegment[] = []
   // process in 60 s slabs to bound memory; local ids are per slab anyway
   const slab = 60 * ASR_SAMPLE_RATE
@@ -63,15 +89,12 @@ export function toTurns(segs: LocalSegment[], minSec = 0.6): Array<{ start: numb
  * Step 2 — one embedding per turn. WeSpeaker ResNet34, 256 dimensions, L2-normalised.
  * Measured: three 5-second embeddings in 2.7 s. Same-speaker similarity measured 0.47–0.53 on a noisy screencast —
  * lower than the 0.6–0.8 typical on clean speech — which is why the merge threshold is a parameter, default 0.35.
- * Measured on the eval fixtures: the same voice scores 0.58–0.86 with itself across positions and lengths, but 0.06–0.16
- * when background music is under it — jingles and outros form their own cluster. See scripts/probe-speaker-embeddings.mts.
+ * Measured on the eval fixtures: the same voice scores 0.51–0.86 with itself across positions and lengths (the 0.51 is a
+ * 2 s cut against a 5 s window), but 0.06–0.16 when background music is under it — jingles and outros form their own
+ * cluster. See scripts/probe-speaker-embeddings.mts and docs/DESIGN.md §3.4.
  */
 export async function speakerEmbeddings(pcm: Float32Array, turns: Array<{ start: number; end: number }>, config: OllosConfig, signal?: AbortSignal, onProgress?: (i: number, n: number) => void): Promise<Float32Array[]> {
-  configureModelRuntime(config)
-  const id = config.models.speaker
-  const [fe, model] = await Promise.all([AutoFeatureExtractor.from_pretrained(id), AutoModel.from_pretrained(id)]).catch((e: unknown) => {
-    throw new OllosError('MODEL_LOAD_FAILED', `could not load ${id}: ${e instanceof Error ? e.message : String(e)}`, { cause: e })
-  })
+  const { fe, model } = await loadSpeakerModel(config)
   const out: Float32Array[] = []
   for (let i = 0; i < turns.length; i++) {
     if (signal?.aborted) throw new OllosError('CANCELLED', 'cancelled')
@@ -104,7 +127,8 @@ export function cosine(a: Float32Array, b: Float32Array): number {
 
 /**
  * Step 3 — agglomerative clustering, average linkage on cosine similarity.
- * Merge the two closest clusters while their similarity ≥ threshold, or until maxSpeakers is reached.
+ * Merge the two closest clusters while their similarity ≥ threshold, and keep merging regardless of similarity while
+ * more than maxSpeakers clusters remain; never merge below minSpeakers.
  */
 export function clusterSpeakers(embeddings: Float32Array[], opts: { threshold?: number; maxSpeakers?: number; minSpeakers?: number; weights?: number[] } = {}): number[] {
   const threshold = opts.threshold ?? 0.35

@@ -50,11 +50,25 @@ export class Cache {
     return p
   }
 
-  has(namespace: string, key: string, filename = 'result.json'): boolean {
-    return exists(path.join(this.root, namespace, key, filename))
-  }
-
   dir(namespace: string, key: string): string {
     return ensureDir(path.join(this.root, namespace, key))
   }
+}
+
+/**
+ * Bring an artifact of an earlier job into the current job's directory and return its new path.
+ * A cache hit returns a result whose files live under the *old* job; the MCP resources build `ollos://jobs/<new id>/…`
+ * links from the new job id, so without this every link on a cached answer is dead. A hard link costs no disk and
+ * survives `gc` removing the old job; copying is the fallback for volumes that refuse links.
+ */
+export function adoptArtifact(src: string, destDir: string, name = path.basename(src)): string {
+  const dest = path.join(ensureDir(destDir), name)
+  if (path.resolve(src) === path.resolve(dest)) return dest
+  if (exists(dest)) fs.rmSync(dest, { force: true })
+  try {
+    fs.linkSync(src, dest)
+  } catch {
+    fs.copyFileSync(src, dest)
+  }
+  return dest
 }
