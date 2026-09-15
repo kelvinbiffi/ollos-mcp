@@ -24,8 +24,12 @@ jobs:
           cache: npm
       # Trusted publishing (OIDC, no token) needs npm >= 11.5; the Node 22 image ships an older npm
       - run: npm install -g npm@latest
+      # the media tests generate clips with ffmpeg; use the system one so the job does not depend on ffmpeg-static's postinstall
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - run: npm ci
       - run: npm run typecheck && npm test && npm run build
+        env:
+          OLLOS_HOME: ${{ runner.temp }}/ollos
       - name: Check version matches the tag
         if: github.event_name == 'release'
         run: |
