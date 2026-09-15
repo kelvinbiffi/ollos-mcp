@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { OllosConfig } from '../config.js'
-import { Cache, hashOf } from '../cache/cache.js'
+import { adoptArtifact, Cache, hashOf } from '../cache/cache.js'
 import { OllosError } from '../errors.js'
 import type { JobContext } from '../jobs/types.js'
 import { fmtTime } from '../media/ffmpeg.js'
@@ -82,9 +82,19 @@ export async function runReadScreen(params: ReadScreenParams, ctx: JobContext, c
   const cache = new Cache(config)
   const key = hashOf(kf.source.identity, kf.frames.map((f) => f.pts), langs, detect, SCANNER_VERSION)
   const hit = cache.getJSON<ReadScreenResult>('ocr', key)
-  if (hit) {
+  const hitFiles = hit ? [hit.artifacts.json, hit.artifacts.txt, ...(hit.images?.frames.map((f) => f.file) ?? []), ...(hit.images?.sheets.map((s) => s.file) ?? [])] : []
+  if (hit && hitFiles.every((f) => fs.existsSync(f))) {
     ctx.event({ stage: 'cache', event: 'info', message: 'ocr served from cache' })
-    return { ...hit, cached: true }
+    // the earlier job's files are linked into this job: ollos://jobs/<this id>/ocr and ollos_frames both resolve,
+    // and `ollos gc` removing the old job cannot leave this result pointing at nothing
+    const framesDir = path.join(ctx.artifactsDir, 'frames')
+    const sheetsDir = path.join(ctx.artifactsDir, 'sheets')
+    return {
+      ...hit,
+      images: hit.images ? { frames: hit.images.frames.map((f) => ({ ...f, file: adoptArtifact(f.file, framesDir) })), sheets: hit.images.sheets.map((s) => ({ ...s, file: adoptArtifact(s.file, sheetsDir) })) } : undefined,
+      artifacts: { json: adoptArtifact(hit.artifacts.json, ctx.artifactsDir), txt: adoptArtifact(hit.artifacts.txt, ctx.artifactsDir) },
+      cached: true,
+    }
   }
 
   const frames: ScreenFrame[] = []

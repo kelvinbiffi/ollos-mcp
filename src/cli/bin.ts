@@ -5,9 +5,11 @@ import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { createOllos, type JobRecord } from '../core/index.js'
 import { dirs } from '../core/config.js'
-import { resolveBinaries, fmtTime } from '../core/media/ffmpeg.js'
+import { resolveBinaries, fmtTime, parseTime } from '../core/media/ffmpeg.js'
 import { configureModelRuntime, isModelCached, modelCatalog, ensureFile } from '../core/models.js'
 import { loadAsr } from '../core/audio/asr.js'
+import { loadSegmentationModel, loadSpeakerModel } from '../core/audio/diarize.js'
+import { embed } from '../core/search/index.js'
 import { isOllosError } from '../core/errors.js'
 import { formatDiarize, formatKeyframes, formatReadScreen, formatReview, formatSearch, formatTranscribe } from '../mcp/format.js'
 import type { TranscribeResult, KeyframesResult, ReadScreenResult, ReviewResult, DiarizeResult } from '../core/index.js'
@@ -21,24 +23,19 @@ usage: ollos <command> [options]
   keyframes <source> [--sensitivity normal] [--max-frames 120] [--from t] [--to t]
   read-screen <source> [--no-secrets] [--from t] [--to t]
   review <source> [--platform youtube] [--checks loudness,silences,aspect,secrets] [--from t] [--to t]
-  diarize <source> [--transcript <jobId>] [--max-speakers n] [--threshold 0.4] [--from t] [--to t]
+  diarize <source> [--transcript <jobId>] [--max-speakers n] [--threshold 0.35] [--from t] [--to t]
   search "<query>" [--k 8] [--job <jobId>]
   jobs                                list jobs
   job <id>                            job status and result
   events <id>                         job timeline
   cancel <id>
-  warmup [--all]                      download models now (ASR + VAD; --all adds OCR data)
-  doctor                              check ffmpeg, models, disk, home
-  gc [--older-than 30d]               delete old jobs and cache
+  warmup [--all]                      download models now (default ASR + VAD; --all adds fast ASR, speakers, search, OCR data)
+  doctor                              check ffmpeg, models, memory, home
+  gc [--older-than 30d]               delete old jobs, cache entries and search indexes (models stay)
 
   --json     print the raw result as JSON
   --home     override OLLOS_HOME
   --detailed full output instead of concise`
-
-function parseTime(t?: string): number | undefined {
-  if (!t) return undefined
-  return t.split(':').map(Number).reduce((a, n) => a * 60 + n, 0)
-}
 
 async function follow<R>(ollos: ReturnType<typeof createOllos>, p: Promise<{ job: JobRecord; result?: R }>, quiet: boolean): Promise<{ job: JobRecord; result?: R }> {
   const { job, result } = await p
@@ -160,12 +157,12 @@ async function main() {
     }
     case 'events': {
       const ev = ollos.events(need('job id'))
-      out(ev.map((e) => `${e.ts}  ${e.stage.padEnd(10)} ${e.event.padEnd(8)} ${e.durationMs !== undefined ? (e.durationMs + 'ms').padStart(9) : ''.padStart(9)}  ${e.message ?? ''} ${e.data ? JSON.stringify(e.data) : ''}`).join('\n'), ev)
+      out(ev.map((e) => `${e.ts}  ${e.stage.padEnd(10)} ${e.event.padEnd(8)} ${e.durationMs !== undefined ? (e.durationMs + 'ms').padStart(9) : ''.padStart(9)}  ${e.message ?? ''} ${e.data ? JSON.stringify(e.data) : ''}${e.mem ? ` mem rss=${e.mem.rss}MB heap=${e.mem.heap}MB arrayBuffers=${e.mem.arrayBuffers}MB` : ''}`).join('\n'), ev)
       return
     }
     case 'cancel': {
       const j = ollos.cancel(need('job id'))
-      out(`${j.id} is now ${j.status}`, j)
+      out(j.status === 'cancelled' ? `${j.id} is now cancelled` : `${j.id} had already finished (${j.status}); nothing to cancel`, j)
       return
     }
     case 'warmup': {
@@ -178,8 +175,15 @@ async function main() {
       await loadAsr('accurate', ollos.config, log)
       console.error('\n  ✓ whisper-large-v3-turbo')
       if (values.all) {
+        // everything the other tools will ask for, so OLLOS_OFFLINE=1 afterwards works for every capability
         await loadAsr('fast', ollos.config, log)
         console.error('\n  ✓ whisper-base')
+        await loadSegmentationModel(ollos.config, log)
+        console.error('\n  ✓ pyannote-segmentation-3.0')
+        await loadSpeakerModel(ollos.config, log)
+        console.error('\n  ✓ wespeaker-voxceleb-resnet34-LM')
+        await embed(['warmup'], 'query', ollos.config)
+        console.error('  ✓ multilingual-e5-small')
         const { getOcrPool, terminateOcr } = await import('../core/vision/ocr.js')
         const pool = getOcrPool(ollos.config, ['por', 'eng'])
         pool.release(await pool.acquire())
@@ -223,7 +227,24 @@ async function main() {
         ollos.engine.store.remove(j.id)
         n++
       }
-      console.log(`removed ${n} job(s) older than ${days} days`)
+      // cache/<namespace>/<key>/ and index/<jobId>/ are content-addressed and rebuildable; models are not touched
+      let entries = 0
+      for (const root of [path.join(ollos.config.home, 'cache'), path.join(ollos.config.home, 'index')]) {
+        if (!fs.existsSync(root)) continue
+        const level = root.endsWith('index') ? [root] : fs.readdirSync(root).map((ns) => path.join(root, ns)).filter((p) => fs.statSync(p).isDirectory())
+        for (const parent of level) for (const entry of fs.readdirSync(parent)) {
+          const p = path.join(parent, entry)
+          try {
+            if (fs.statSync(p).mtimeMs < cutoff) {
+              fs.rmSync(p, { recursive: true, force: true })
+              entries++
+            }
+          } catch {
+            /* vanished under us */
+          }
+        }
+      }
+      console.log(`removed ${n} job(s) and ${entries} cache/index entr${entries === 1 ? 'y' : 'ies'} older than ${days} days`)
       return
     }
     default:

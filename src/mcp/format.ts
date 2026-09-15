@@ -37,6 +37,8 @@ export const uris = {
   sheet: (id: string, n: number) => `ollos://jobs/${id}/sheet/${n}`,
   frame: (id: string, n: number) => `ollos://jobs/${id}/frame/${n}`,
   events: (id: string) => `ollos://jobs/${id}/events`,
+  speakers: (id: string) => `ollos://jobs/${id}/speakers`,
+  transcriptSpeakers: (id: string) => `ollos://jobs/${id}/transcript.speakers`,
 }
 
 export function formatTranscribe(r: TranscribeResult, jobId: string, format: Format, budget: number): string {
@@ -92,24 +94,36 @@ export function formatReadScreen(r: ReadScreenResult, jobId: string, format: For
   return head.join('\n') + '\n\n' + untrusted(truncateToBudget(body, budget - estimateTokens(head.join('\n')) - 40, uris.ocr(jobId)))
 }
 
-export function formatReview(r: ReviewResult, jobId: string): string {
+/** Concise keeps at most 8 findings per severity (the report has all of them); detailed prints every finding with its detail. */
+export function formatReview(r: ReviewResult, jobId: string, format: Format = 'concise'): string {
   const icon = { ok: '✅', info: 'ℹ️', warn: '⚠️', block: '⛔' } as const
   const lines = [`Pre-publish review of ${path.basename(r.source.input)} — verdict ${icon[r.verdict]} ${r.verdict.toUpperCase()} for ${r.platform} · ${fmtTime(r.source.durationSec)}`, `Report: ${uris.report(jobId)}`, '']
-  for (const f of r.findings) lines.push(`${icon[f.severity]} ${f.title}${f.atSec !== undefined ? ` (at ${fmtTime(f.atSec)})` : ''}${f.detail ? `\n   ${f.detail}` : ''}`)
+  const perSeverity = new Map<string, number>()
+  let hidden = 0
+  for (const f of r.findings) {
+    const n = (perSeverity.get(f.severity) ?? 0) + 1
+    perSeverity.set(f.severity, n)
+    if (format === 'concise' && n > 8) {
+      hidden++
+      continue
+    }
+    lines.push(`${icon[f.severity]} ${f.title}${f.atSec !== undefined ? ` (at ${fmtTime(f.atSec)})` : ''}${f.detail ? `\n   ${f.detail}` : ''}`)
+  }
+  if (hidden) lines.push(`… ${hidden} more finding(s) in the report (or pass format: "detailed")`)
   return lines.join('\n')
 }
 
 export function formatDiarize(r: DiarizeResult, jobId: string, format: Format, budget: number): string {
   const head = [
     `Speakers in ${path.basename(r.source.input)} — ${fmtTime(r.source.durationSec)} · method ${r.method}${r.experimental ? ' (experimental: threshold ' + r.stats.threshold + ', calibrate on your recordings)' : ''}${r.cached ? ' (cached)' : ''}`,
-    `${r.speakers.length} speaker(s), ${r.turns.length} turns · speakers.json: ollos://jobs/${jobId}/speakers`,
+    `${r.speakers.length} speaker(s), ${r.turns.length} turns · speakers.json: ${uris.speakers(jobId)}`,
     ...r.speakers.map((s) => `  ${s.id}${s.name ? ` (${s.name})` : ''}: ${fmtTime(s.talkTimeSec)} over ${s.turns} turn(s)${s.voiceClip ? ` · voice clip ${path.basename(s.voiceClip)}` : ''}`),
   ]
   if (r.segments) {
-    head.push('', `Transcript with speakers: ollos://jobs/${jobId}/transcript.speakers`)
+    head.push('', `Transcript with speakers: ${uris.transcriptSpeakers(jobId)}`)
     const lines = r.segments.map((s) => `[${fmtTime(s.startSec)} ${s.speaker ?? '?'}] ${s.text}`)
     const body = format === 'concise' ? lines.slice(0, 12).join('\n') + (lines.length > 12 ? `\n… (${lines.length} segments)` : '') : lines.join('\n')
-    return head.join('\n') + '\n\n' + untrusted(truncateToBudget(body, budget - estimateTokens(head.join('\n')) - 40, `ollos://jobs/${jobId}/transcript.speakers`))
+    return head.join('\n') + '\n\n' + untrusted(truncateToBudget(body, budget - estimateTokens(head.join('\n')) - 40, uris.transcriptSpeakers(jobId)))
   }
   if (format === 'detailed') {
     head.push('', 'turns:')

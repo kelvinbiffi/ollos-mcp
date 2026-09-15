@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { OllosConfig } from '../config.js'
-import { Cache, hashOf } from '../cache/cache.js'
+import { adoptArtifact, Cache, hashOf } from '../cache/cache.js'
 import { OllosError } from '../errors.js'
 import type { JobContext } from '../jobs/types.js'
 import { fmtTime } from '../media/ffmpeg.js'
@@ -102,9 +102,17 @@ export async function runKeyframes(params: KeyframesParams, ctx: JobContext, con
   const cache = new Cache(config)
   const key = hashOf(src.identity, sensitivity, maxFrames, frameWidth, params.presenterRegion ?? null, floorSec, params.sheetCols ?? 3, from, to, (params.anchorsSec ?? []).map((a) => Math.round(a * 2) / 2))
   const hit = cache.getJSON<KeyframesResult>('keyframes', key)
-  if (hit && hit.frames.every((f) => fs.existsSync(f.file))) {
+  if (hit && hit.frames.every((f) => fs.existsSync(f.file)) && hit.sheets.every((s) => fs.existsSync(s.file))) {
     ctx.event({ stage: 'cache', event: 'info', message: 'keyframes served from cache' })
-    return { ...hit, cached: true }
+    // link the earlier job's images into this job so ollos://jobs/<this id>/sheet/<n> resolves
+    const framesDir = path.join(ctx.artifactsDir, 'frames')
+    const sheetsDir = path.join(ctx.artifactsDir, 'sheets')
+    return {
+      ...hit,
+      frames: hit.frames.map((f) => ({ ...f, file: adoptArtifact(f.file, framesDir) })),
+      sheets: hit.sheets.map((s) => ({ ...s, file: adoptArtifact(s.file, sheetsDir) })),
+      cached: true,
+    }
   }
 
   ctx.progress('sample', 0.05, 'sampling 1 fps thumbnails')
@@ -150,14 +158,26 @@ export async function runKeyframes(params: KeyframesParams, ctx: JobContext, con
 
   let pruned = 0
   if (merged.length > maxFrames) {
-    // drop hash-only candidates with the smallest change first; never drop cuts or anchors
+    // 1. hash/floor-only candidates go first, least change first — they are the compressible part
     const droppable = merged.filter((c) => c.sources.size === 1 && (c.sources.has('hash') || c.sources.has('floor'))).sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0))
     const toDrop = new Set(droppable.slice(0, merged.length - maxFrames))
     pruned = toDrop.size
     merged = merged.filter((c) => !toDrop.has(c))
+    // 2. if cuts and anchors alone still exceed the cap, thin them by temporal spread instead of truncating the tail:
+    //    an agent asking for 40 frames of a 2-hour lecture still sees the whole lecture, not its first 20 minutes.
+    //    Anchors (explicitly requested instants) survive over cuts.
     if (merged.length > maxFrames) {
-      pruned += merged.length - maxFrames
-      merged = merged.slice(0, maxFrames)
+      const keep = new Set<Candidate>()
+      const anchors = merged.filter((c) => c.sources.has('anchor'))
+      const rest = merged.filter((c) => !c.sources.has('anchor'))
+      for (const a of anchors.slice(0, maxFrames)) keep.add(a)
+      const room = maxFrames - keep.size
+      if (room > 0 && rest.length) {
+        const step = rest.length / room
+        for (let k = 0; k < room; k++) keep.add(rest[Math.min(rest.length - 1, Math.floor(k * step))]!)
+      }
+      pruned += merged.length - keep.size
+      merged = merged.filter((c) => keep.has(c))
     }
   }
 
