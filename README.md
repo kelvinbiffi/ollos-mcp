@@ -238,6 +238,7 @@ Site downloads (YouTube, Instagram, TikTok…) need `yt-dlp` on your PATH (or `O
 | `MODEL_MISSING_OFFLINE` | `OLLOS_OFFLINE=1` but a model was never downloaded. Run `ollos warmup --all` once online. |
 | `PRIVATE_ADDRESS_BLOCKED` | The URL (or a redirect it returned) points at a private or loopback address. Intentional? `OLLOS_ALLOW_PRIVATE=1`. |
 | `DURATION_EXCEEDED` | Media longer than `OLLOS_MAX_DURATION_SEC` (4 h). Pass `from`/`to` or raise the limit. |
+| `Could not load the "sharp" module using the win32-x64 runtime` (or another platform) at startup | The `npx` cache holds an install without the platform binary of `sharp` (seen once on Windows: macOS and Linux binaries present, `win32-x64` missing). Clear it and retry, or install globally: `npm i -g ollos-mcp` and point the client at the `ollos-mcp` command. |
 | Client reports a JSON parse error or the server "exits immediately" | Something wrote to stdout. The server guards stdout, so this points at a broken install: run `node dist/mcp/bin.js` and send an `initialize` line by hand (the CI does exactly this); `npm run smoke:mcp` reproduces it. |
 | Transcription is slow or the machine swaps | The default model needs ~4.3 GB of RAM and all cores. `model: "fast"` (~1.9 GB) or a `from`/`to` window. `ollos doctor` shows free memory and cores. |
 | A job stays `running` after the server was killed | It is reported `interrupted` on the next poll once its heartbeat is 30 s old; submit it again, cached stages are reused. |
