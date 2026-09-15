@@ -17,7 +17,7 @@ src/core/       the engine — no MCP, no CLI imports allowed here
   errors.ts       OllosError + codes
   ort.ts          single shared ONNX Runtime (never import onnxruntime-node directly)
   models.ts       model runtime config, catalogue, downloads
-  media/          ffmpeg/ffprobe wrappers: probe, decode, measure, frames
+  media/          ffmpeg/ffprobe wrappers: probe, decode, measure
   source/         resolve path | URL | site | data: | Zoom folder; SSRF guard
   audio/          VAD, ASR, hallucination filters, glossary, diarization
   vision/         dHash, keyframe helpers, OCR, secret scanner
@@ -47,7 +47,7 @@ npm run dev:mcp             # MCP server on stdio (tsx)
 npx tsx src/cli/bin.ts doctor
 ```
 
-Smoke tests against a real file (models download on first run, ~1 GB):
+Smoke tests against a real file (models download on first run: 2.75 GB for the default ASR model):
 
 ```bash
 npx tsx scripts/smoke-transcribe.ts path/to/video.mp4 30 90
@@ -71,14 +71,18 @@ npx tsx scripts/smoke-mcp.ts path/to/video.mp4      # talks real MCP over stdio
 - `test/pure.test.ts` — hashing, filters, glossary, secret scanner (including regression cases from real false positives), aspect, SSRF, windows.
 - `test/engine.test.ts` — inline vs queued, progress, failure, cancel, per-class serialisation, orphan recovery.
 - `test/media.test.ts` — probe, decode, silences, loudness, scene cuts, thumbnails, contact sheet, VAD on an 8-second clip generated with `lavfi`. No binary fixtures in the repo.
+- `test/models.test.ts` — the `PathCache` transformers.js model cache (path strings for ONNX, `Response` for JSON, atomic downloads).
+- `test/security.test.ts` — job-id validation, IPv6 transition ranges in the SSRF guard, OCR text redaction, OCR pool failure handling.
 
-Model-dependent behaviour (Whisper, pyannote, WeSpeaker, e5) is covered by `scripts/` and `eval/`, not by unit tests, because it needs ~1 GB of models and minutes of CPU.
+Model-dependent behaviour (Whisper, pyannote, WeSpeaker, e5) is covered by `scripts/` and `eval/`, not by unit tests, because it needs gigabytes of models and minutes of CPU.
 
 ## Style
 
 TypeScript strict, ESM, no default exports, small files with one responsibility. Comments explain **why** (a measurement, a failure mode), not what. Keep tool descriptions in the voice of explaining to a new colleague.
 
 ## Commits
+
+Never add a `Co-Authored-By` or any other co-author trailer. No formatter is configured yet: match the surrounding style (2 spaces, no semicolons, single quotes).
 
 Conventional-ish, imperative, one topic per commit. Do not add co-author trailers.
 

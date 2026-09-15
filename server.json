@@ -1,5 +1,5 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.kelvinbiffi/ollos-mcp",
   "description": "Eyes and ears for AI agents: local, offline transcription, keyframes, on-screen text and a pre-publish review of any audio or video. Node only.",
   "repository": {
@@ -17,7 +17,9 @@
       },
       "environmentVariables": [
         { "name": "OLLOS_HOME", "description": "Where jobs, cache and models live. Default ~/.ollos", "isRequired": false },
-        { "name": "OLLOS_OFFLINE", "description": "Set to 1 to forbid any network access (models must be warmed up first)", "isRequired": false }
+        { "name": "OLLOS_OFFLINE", "description": "Set to 1 to forbid any network access (models must be warmed up first)", "isRequired": false },
+        { "name": "OLLOS_YTDLP", "description": "Path to a yt-dlp binary for video-site URLs (default: found on PATH)", "isRequired": false },
+        { "name": "OLLOS_YTDLP_ARGS", "description": "Allow-listed yt-dlp flags, e.g. --no-check-certificates behind a TLS-intercepting proxy", "isRequired": false }
       ]
     }
   ]

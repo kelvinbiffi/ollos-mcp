@@ -4,6 +4,8 @@
 [![npm](https://img.shields.io/npm/v/ollos-mcp.svg)](https://www.npmjs.com/package/ollos-mcp)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
+[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](cursor://anysphere.cursor-deeplink/mcp/install?name=ollos&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm9sbG9zLW1jcCJdfQ==)
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=ollos&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22ollos-mcp%22%5D%7D)
 
 **Eyes and ears for AI agents.** Local, offline transcription, keyframes, on-screen text and a pre-publish review of any audio, video or image — as an MCP server, a CLI and a Node library. No Python, no cloud, no API key.
 
@@ -30,7 +32,13 @@ It was built for one workflow first — reviewing a screen recording before publ
 
 Node 20+. `npm install` brings its own ffmpeg (`ffmpeg-static`); a system ffmpeg is used if present.
 
-**Claude Code / Cursor / any MCP client** — add to `.mcp.json`:
+**Claude Code**
+
+```bash
+claude mcp add ollos -- npx -y ollos-mcp
+```
+
+or in the project's `.mcp.json` (the same JSON works for Claude Desktop's `claude_desktop_config.json`, Cursor's `.cursor/mcp.json` and Windsurf's `mcp_config.json`):
 
 ```json
 {
@@ -40,12 +48,25 @@ Node 20+. `npm install` brings its own ffmpeg (`ffmpeg-static`); a system ffmpeg
 }
 ```
 
+**VS Code** — `.vscode/mcp.json` uses `servers` instead of `mcpServers`:
+
+```json
+{
+  "servers": {
+    "ollos": { "type": "stdio", "command": "npx", "args": ["-y", "ollos-mcp"] }
+  }
+}
+```
+
+Claude Desktop reads `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS and `%APPDATA%\Claude\claude_desktop_config.json` on Windows. Environment variables (`OLLOS_HOME`, `OLLOS_YTDLP`, …) go in an `env` object next to `args`; use absolute paths, `~` is not expanded.
+
 **CLI**
 
 ```bash
 npm i -g ollos-mcp
-ollos warmup            # download models once (2.75 GB for the accurate ASR model, 3.3 GB for all)
-ollos doctor            # check ffmpeg, models, disk
+ollos warmup            # download the default ASR model and VAD (2.75 GB)
+ollos warmup --all      # every model: fast ASR, speakers, search, OCR data (3.3 GB total)
+ollos doctor            # check ffmpeg, models, free memory, cores
 ```
 
 Models download on first use into `~/.ollos/models`. Set `OLLOS_OFFLINE=1` afterwards to forbid all network access.
@@ -66,6 +87,18 @@ Ten tools, one per distinct contract. Long work never blocks: it returns a `jobI
 | `ollos_search` | Hybrid BM25 + multilingual-embedding search over everything transcribed and read, fused by reciprocal rank. Returns passages with timestamps, never whole transcripts. |
 | `ollos_job` · `ollos_cancel` | Poll and stop jobs. Jobs live on disk and survive a server restart. |
 
+Every parameter is documented in [docs/TOOLS.md](docs/TOOLS.md) (one anchor per tool, e.g. [`ollos_transcribe`](docs/TOOLS.md#ollos_transcribe--hybrid-resource-class-asr)); the tool descriptions the agent sees carry the same information.
+
+### Sources
+
+`source` accepts a local path, a `file://` URL, a Zoom local-recording folder (one audio track per participant), a direct `https://` media URL, a video-site URL (YouTube, Instagram, TikTok, Vimeo, X, Loom… through `yt-dlp`) and a `data:` URI. URLs are downloaded once into the cache; the download runs inside the job and can be cancelled. Refused: private, loopback and link-local addresses on any redirect hop (`OLLOS_ALLOW_PRIVATE=1` to allow), downloads over `OLLOS_MAX_DOWNLOAD_MB`, media over `OLLOS_MAX_DURATION_SEC` from any origin.
+
+```bash
+ollos transcribe "https://www.youtube.com/watch?v=eur8dUO9mvE" --lang en --from 0 --to 30
+```
+
+Tested commands, yt-dlp setup and proxy notes: [examples/url-sources.md](examples/url-sources.md).
+
 Results are **concise by default** and point to MCP resources (`ollos://jobs/<id>/transcript`, `/ocr`, `/report`, `/sheet/<n>`) for the full artifacts, so a 2-hour meeting doesn't flood the context window. Pass `format: "detailed"` when you want it all.
 
 ## CLI
@@ -75,7 +108,7 @@ ollos probe recording.mp4
 ollos transcribe meeting.mp4 --lang pt --vocab "Claude Code,n8n,webhook"
 ollos keyframes lesson.mp4 --sensitivity normal --max-frames 120
 ollos read-screen demo.mp4
-ollos review episode.mp4 --platform youtube     # exit 3 = block, 1 = warn, 0 = ok
+ollos review episode.mp4 --platform youtube     # exit 3 = block, 1 = warn or failure, 2 = usage error, 0 = ok
 ollos jobs · ollos job <id> · ollos events <id> · ollos cancel <id>
 ```
 
@@ -84,13 +117,15 @@ Add `--json` for machine output.
 ## Library
 
 ```ts
-import { createOllos } from 'ollos-mcp'
+import { createOllos, type TranscribeResult } from 'ollos-mcp'
 
 const ollos = createOllos()
-const { job } = await ollos.transcribe({ source: 'talk.mp4', language: 'pt', vocabulary: ['MCP'] })
-const { result } = await ollos.wait(job.id)
-console.log(result.segments[0])
+const { job, result } = await ollos.transcribe({ source: 'talk.mp4', language: 'pt', vocabulary: ['MCP'] })
+const transcript = result ?? (await ollos.wait<TranscribeResult>(job.id)).result // inline when small, a job otherwise
+console.log(transcript?.segments[0])
 ```
+
+More: [examples/library.ts](examples/library.ts) (every capability) and [examples/library-url.ts](examples/library-url.ts) (a YouTube URL as the source).
 
 `ollos-mcp/core` has no MCP dependency: use it from n8n, a script, a Lambda.
 
@@ -135,7 +170,7 @@ Measured on the eval fixtures with the process memory sampled every 200 ms (`scr
 | Transcription, default (whisper-large-v3-turbo, fp32 encoder + q4 decoder) | 2.75 GB | **~4.3 GB** | 60 s of audio in ~46 s (~1.3× real time; 1.7× on an idle machine) |
 | + `ollos_diarize` (pyannote + WeSpeaker) | +32 MB | +0.1 GB | 60 s in ~5 s once loaded |
 | + `ollos_search` (multilingual-e5-small) | +465 MB | +0.8 GB | index build ~4 s per transcript |
-| `ollos_read_screen` / review with OCR (2 Tesseract workers) | 8 MB | +0.3 GB | ~1 s per frame at native resolution |
+| `ollos_read_screen` / review with OCR (2 Tesseract workers) | 8 MB | +0.3 GB | roughly 1–3 s per frame at native resolution, depending on CPU |
 | Everything loaded at once | 3.3 GB | **~5.1 GB** | |
 
 Minimums that follow from this: **8 GB of RAM** for the default model (4 GB is enough for `model: "fast"`), **4 GB of free disk** for all models, any x64 or arm64 CPU (no GPU is used). Transcription speed scales with CPU cores and is the only stage that is compute-bound; a 4-core laptop should expect roughly 0.4× real time on the default model, so a one-hour meeting takes over two hours, or about 40 minutes with `model: "fast"`.
@@ -169,9 +204,9 @@ Planned, in order of value (see Roadmap):
 ## Privacy & security
 
 - Nothing is uploaded. Network is used only to download models once and to fetch a source URL you pass.
-- URL fetching refuses private and loopback addresses (SSRF) unless `OLLOS_ALLOW_PRIVATE=1`.
+- URL fetching refuses private, loopback, link-local and IPv6-transition addresses (SSRF), on the first request and on every redirect hop, unless `OLLOS_ALLOW_PRIVATE=1`.
 - Transcripts and on-screen text are returned inside `<untrusted-content>` — they are data, not instructions. The bundled skill says the same to the agent.
-- Secret findings are masked in results, logs and events.
+- Secret findings are masked in results, logs and events, and the OCR text returned next to them is redacted with the same masks — the tool that warns about a leak is not the leak.
 - Recording other people requires their consent where you live.
 
 ## Configuration
@@ -183,12 +218,29 @@ Planned, in order of value (see Roadmap):
 | `OLLOS_ALLOW_PRIVATE` | `0` | allow fetching from private networks |
 | `OLLOS_MAX_DOWNLOAD_MB` | `2048` | download cap |
 | `OLLOS_MAX_DURATION_SEC` | `14400` | media longer than this is refused (use `from`/`to`) |
-| `OLLOS_CONCURRENCY_VISION` / `_OCR` | `2` | parallel jobs per class (ASR is fixed at 1) |
+| `OLLOS_CONCURRENCY_VISION` / `_OCR` / `_DOWNLOAD` | `2` | parallel jobs per class (ASR is fixed at 1) |
+| `OLLOS_MAX_FRAMES` | `500` | hard cap on frames per keyframes job |
+| `OLLOS_RESPONSE_TOKENS` | `20000` | response budget before truncation with a pointer to the resource |
+| `OLLOS_INLINE_THRESHOLD_SEC` | `8` | estimated work under this runs inline; `0` never inlines |
 | `OLLOS_FFMPEG` / `OLLOS_FFPROBE` / `OLLOS_YTDLP` | auto | explicit binary paths |
 | `OLLOS_YTDLP_ARGS` | — | extra yt-dlp flags for every site download, allow-listed (e.g. `--no-check-certificates --js-runtimes node`) |
 | `OLLOS_DEBUG_MEM` | `0` | `1` stamps every job event with process memory (rss, heap, arrayBuffers in MB) |
 
 Site downloads (YouTube, Instagram, TikTok…) need `yt-dlp` on your PATH (or `OLLOS_YTDLP`) and are best-effort: platforms change often. Behind a corporate proxy that re-signs TLS, set `OLLOS_YTDLP_ARGS="--no-check-certificates"`. Local files always work.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `FFMPEG_MISSING` | No ffmpeg found and `ffmpeg-static` failed to install for your platform. Install ffmpeg or set `OLLOS_FFMPEG` / `OLLOS_FFPROBE`. |
+| `YTDLP_MISSING` | Video-site URLs need `yt-dlp` on `PATH` or `OLLOS_YTDLP`. Local files and direct URLs work without it. |
+| `YTDLP_FAILED` with `CERTIFICATE_VERIFY_FAILED` | A corporate proxy re-signs TLS. `OLLOS_YTDLP_ARGS="--no-check-certificates"`. Other failures: `yt-dlp -U`, or download the file and pass the path. |
+| `MODEL_MISSING_OFFLINE` | `OLLOS_OFFLINE=1` but a model was never downloaded. Run `ollos warmup --all` once online. |
+| `PRIVATE_ADDRESS_BLOCKED` | The URL (or a redirect it returned) points at a private or loopback address. Intentional? `OLLOS_ALLOW_PRIVATE=1`. |
+| `DURATION_EXCEEDED` | Media longer than `OLLOS_MAX_DURATION_SEC` (4 h). Pass `from`/`to` or raise the limit. |
+| Client reports a JSON parse error or the server "exits immediately" | Something wrote to stdout. The server guards stdout, so this points at a broken install: run `node dist/mcp/bin.js` and send an `initialize` line by hand (the CI does exactly this); `npm run smoke:mcp` reproduces it. |
+| Transcription is slow or the machine swaps | The default model needs ~4.3 GB of RAM and all cores. `model: "fast"` (~1.9 GB) or a `from`/`to` window. `ollos doctor` shows free memory and cores. |
+| A job stays `running` after the server was killed | It is reported `interrupted` on the next poll once its heartbeat is 30 s old; submit it again, cached stages are reused. |
 
 ## Known limits
 
@@ -196,7 +248,7 @@ Site downloads (YouTube, Instagram, TikTok…) need `yt-dlp` on your PATH (or `O
 - Segment `confidence` is a heuristic (speech coverage, speaking rate, filters), not a model probability.
 - Text around 8 px in the source video is at the edge of what OCR reads: detection of a secret that small depends on the exact frame, so ollos reads several frames around each hard cut. Below that, the UI-context signal still flags the situation ("API Key Created" is read reliably).
 - `ollos_diarize` is experimental. Speech with background music (intros, jingles, outros) embeds far from the same voice on clean speech and comes out as an extra speaker regardless of the merge threshold (measured in `eval/`). Heavy crosstalk is unsolved. With Zoom per-participant tracks the result is exact.
-- Site downloads depend on `yt-dlp` being installed; the standalone binary is not bundled yet.
+- Site downloads depend on `yt-dlp` being installed; the standalone binary is not bundled yet. See [examples/url-sources.md](examples/url-sources.md).
 - Progress notifications and the MCP Tasks extension are not used yet; polling `ollos_job` is the contract for every client today.
 
 ## Roadmap

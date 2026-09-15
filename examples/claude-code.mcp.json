@@ -2,10 +2,10 @@
   "mcpServers": {
     "ollos": {
       "command": "npx",
-      "args": ["-y", "ollos-mcp"],
-      "env": {
-        "OLLOS_HOME": "~/.ollos"
-      }
+      "args": [
+        "-y",
+        "ollos-mcp"
+      ]
     }
   }
 }

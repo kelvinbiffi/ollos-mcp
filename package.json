@@ -1,5 +1,6 @@
 {
   "name": "ollos-mcp",
+  "mcpName": "io.github.kelvinbiffi/ollos-mcp",
   "version": "0.1.0",
   "description": "Ollos gives AI agents eyes and ears. Local, offline transcription, speaker turns, keyframes, on-screen text and a pre-publish review for any audio or video. MCP server, CLI and library. Node only, no Python.",
   "keywords": [
@@ -62,7 +63,8 @@
     "eval": "tsx eval/run.ts",
     "eval:fetch": "tsx eval/fetch.ts",
     "smoke:mcp": "tsx scripts/smoke-mcp.ts",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run build && npm test",
+    "postbuild": "node -e \"for (const f of ['dist/mcp/bin.js','dist/cli/bin.js']) { try { require('fs').chmodSync(f, 0o755) } catch {} }\""
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
@@ -80,5 +82,9 @@
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

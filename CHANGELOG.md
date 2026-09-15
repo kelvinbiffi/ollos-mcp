@@ -4,6 +4,44 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Security
+
+- Raw OCR text is redacted with the same masks as the secret findings before it is returned, written to `ocr.json`/`ocr.txt`, cached or indexed for `ollos_search`. The scanner's compact view no longer glues lines together.
+- Job ids from resource URIs and tool arguments are validated against `^j_[0-9a-f]{12}$` before touching the filesystem; read paths never create directories (the SDK's URI matcher passed `..` and backslashes through).
+- SSRF guard: redirects are followed manually with the public-host check on every hop, bounded by `maxRedirects`; IPv6 transition addresses (v4-mapped, NAT64, 6to4, Teredo) are unwrapped and checked; documentation, benchmarking and `.home.arpa` ranges refused.
+- `OLLOS_MAX_DURATION_SEC` applies to every source kind, not only local files.
+
+### Fixed
+
+- The heartbeat timer could throw (`EPERM` on a rename over an open `job.json` on Windows) and kill the whole server; it is now best effort, and atomic renames retry.
+- The OCR worker pool counted failed worker creations as created; after two failures every later OCR job waited forever. Failures roll back, waiters are told, and a cancelled job leaves the queue.
+- The source (a URL download, a probe) was resolved before the job existed and again when it ran; it is now resolved once, under the job's signal, with the job already visible as `queued`. A missing file or a refused URL fails the submission immediately with the real error instead of a 600-second estimate.
+- `recover()` no longer flips fresh `queued` jobs of a live sibling process to `interrupted`; stale orphans are caught lazily on every read, so a respawned server never reports a frozen `running` forever.
+- `cancel()` returns the record after the change; a finished job is reported with `cancelled: false` instead of an error. `ollos_cancel` and `ollos cancel` say so.
+- Partial downloads (`.part`, yt-dlp intermediates) were adopted as cached results after a kill; yt-dlp now works in a private temp directory and only the merged file is moved into the cache.
+- `file:///C:/x` became `C:\C:\x` on Windows.
+- `ollos_frames` counted content blocks instead of images, returning half the requested sheets; it now declares an `outputSchema`.
+- Cache hits returned artifact paths of the earlier job, so every `ollos://jobs/<new id>/…` link on a cached answer was dead; artifacts are hard-linked (copied where links are refused) into the new job for transcribe, keyframes, read_screen and diarize.
+- Keyframes: when cuts and anchors alone exceed `maxFrames` they are thinned by temporal spread (anchors first) instead of truncating the tail; a cut in the last 0.4 s seeked past EOF and failed the job.
+- `ollos_diarize` validates `transcriptJobId` (exists, completed, kind `transcribe`) before doing minutes of work.
+- `warmup --all` fetches every model (fast ASR, pyannote, WeSpeaker, e5, Tesseract), so `OLLOS_OFFLINE=1` works for every capability; `gc` also removes cache and index entries.
+- `ollos_probe` `aspect.fits` uses the same platform ids `ollos_review.platform` accepts.
+- Set-but-invalid environment values (`OLLOS_MAX_DOWNLOAD_MB=0`) now fail with `INVALID_ARGUMENT` instead of silently using the default.
+
+### Changed
+
+- `from`/`to` accept seconds as a number or a `m:ss` string on every tool; one validated `parseTime` for MCP, CLI and pipelines.
+- Every tool parameter has a description; `ollos_review` gained `format`; `ollos_transcribe` gained `vadThreshold`; descriptions state measured speeds in the project's "N× real time" convention and the real embedding model size (465 MB).
+- `INTERRUPTED` is a stable error code.
+- `SubmitResult.etaSeconds` carries the estimate; the MCP layer no longer resolves the source a second time for the ETA.
+
+### Added
+
+- `CLAUDE.md` for agents working in the repo; `mcpName` in `package.json` (required by the MCP Registry); `server.json` on the 2025-12-11 schema; `.mcp.json` at the repo root for local development; `.editorconfig`.
+- README: install snippets per client (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf), one-click badges, a Sources section, a Troubleshooting table, the missing configuration variables; `examples/url-sources.md` and `examples/library-url.ts` with tested URL commands.
+- `test/security.test.ts` (job ids, IPv6 transition ranges, redaction, OCR pool) and engine tests for stale/fresh orphans, cancel semantics and `prepare()` failures — 96 tests.
+
+
 ## [0.1.0] — 2026-09-14
 
 First release. Everything below was measured on real media before being made the default; see `docs/DESIGN.md` §3.

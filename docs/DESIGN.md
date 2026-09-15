@@ -306,7 +306,7 @@ The worker touches `job.json` every 5 s. On startup the server sweeps `jobs/` an
 | `asr` | 1 | §3.3; diarization shares it |
 | `vision` | 2 | ffmpeg + dHash are light and I/O-bound |
 | `ocr` | 2 | WASM, one Tesseract worker per slot |
-| `download` | 2 | network |
+| `download` | 2 | reserved: downloads currently run inside source resolution, under the job's own signal |
 
 #### 5.3.3 Protocol representation: two modes
 
@@ -409,18 +409,18 @@ Accepts four forms and normalises to a local file whose real type `ffprobe` deci
 | Local path | validated |
 | Folder | if it has Zoom's `Audio Record/` layout → multi-track source; otherwise a clear error |
 | `https://` direct | downloaded to the cache respecting `content-length`; 2 GB cap enforced mid-stream |
-| Video-site URL | `yt-dlp` from `OLLOS_YTDLP` or `PATH`; `cookiesFile`; `ytDlpArgs` through an allow-list; **best effort**, with the yt-dlp message and a hint in the error |
+| Video-site URL | `yt-dlp` from `OLLOS_YTDLP` or `PATH`; extra flags only through the `OLLOS_YTDLP_ARGS` allow-list (per-call options are not exposed by any tool); works in a private temp dir so a killed download never poisons the cache; **best effort**, with the yt-dlp message and a hint in the error |
 | `data:` / base64 | written to the cache |
 
 A task incompatible with the detected kind (`transcribe` on an image) fails before any work starts.
 
-**SSRF**: private ranges (10/8, 172.16/12, 192.168/16, 127/8, link-local, CGNAT, ULA, multicast) refused by default after resolving every address of the host; `OLLOS_ALLOW_PRIVATE=1` to opt out. An MCP server runs with the user's credentials; external input is hostile until proven otherwise.
+**SSRF**: private ranges (10/8, 172.16/12, 192.168/16, 127/8, link-local, CGNAT, ULA, multicast, documentation and benchmarking blocks) refused by default after resolving every address of the host, with IPv6 transition forms (v4-mapped, NAT64, 6to4, Teredo) unwrapped to the IPv4 they carry; redirects are followed by hand and every hop is checked again, bounded by `maxRedirects`; `OLLOS_ALLOW_PRIVATE=1` to opt out. A DNS-rebinding window remains between the guard's lookup and undici's. An MCP server runs with the user's credentials; external input is hostile until proven otherwise.
 
 ### 5.8 Search (local retrieval)
 
 `ollos_search` answers "what was said about X" and "when did Y appear on screen" without pouring the transcript into the agent.
 
-- **Index per job** in `index/<jobId>/`: each speech segment and each OCR block becomes a document `{ text, start, end, kind, speaker? }`
+- **Index per job** in `index/<jobId>/`: each speech segment and each OCR'd frame (text capped at 2 000 chars) becomes a document `{ text, start, end, kind, speaker? }`
 - **Local embeddings**: `Xenova/multilingual-e5-small` (`query:` / `passage:` prefixes, mean-pooled, normalised). Multilingual because a Portuguese meeting quotes English terms.
 - **Hybrid**: BM25 (names, acronyms, numbers — "n8n", "401") + cosine, fused by reciprocal rank (k = 60). Identical passages from the same media are shown once.
 - `scope: "job" | "all"` — `all` is the competitor's `search_memory`: everything ollos has seen, searchable.
@@ -434,7 +434,7 @@ Hard rule: **no tool dumps a whole artifact into the response.**
 - Every output has `format: "concise" | "detailed"`; concise is the default.
 - `transcribe` concise: language, duration, counts, the first ~700 characters, and the **resource URI** for the full text.
 - `keyframes` concise: counts and the sheets as `resource_link`s; the agent asks for an image with `ollos_frames`.
-- `review` concise: findings with verdicts, at most eight per severity, the rest in the report.
+- `review` concise: findings with verdicts, at most eight per severity (the secrets finding lists at most eight values in its detail), the rest in the report; `detailed` prints all.
 - Cap per response: 20,000 estimated tokens (below Claude Code's 25,000), with **announced** truncation and a pointer to the resource.
 
 Text that came out of the media is returned inside `<untrusted-content source="media">`. It is data, not instructions.
@@ -445,7 +445,7 @@ Key = identity of what went in **plus** every parameter that changes the output:
 
 ```
 transcript: <mediaId>:<model>:<lang>:<vocabulary>:<from>:<to>:<track>
-keyframes:  <mediaId>:<sensitivity>:<maxFrames>:<frameWidth>:<presenterRegion>:<floor>:<anchors>
+keyframes:  <mediaId>:<sensitivity>:<maxFrames>:<frameWidth>:<presenterRegion>:<floor>:<sheetCols>:<from>:<to>:<anchors>
 ocr:        <mediaId>:<frame pts…>:<languages>:<detectSecrets>:<SCANNER_VERSION>
 ```
 
@@ -500,7 +500,7 @@ Errors: `isError: true` with `{ code, message, hint }` — stable code, natural-
 
 ## 7. Data storage
 
-Everything under `$OLLOS_HOME` (§5.3.2). No database. `job.json` and `result.json` carry `schemaVersion`; migrations are pure functions per version. `events.ndjson` is append-only. `ollos gc --older-than 30d` removes jobs and cache; models stay. Nothing is sent anywhere — there is no telemetry.
+Everything under `$OLLOS_HOME` (§5.3.2). No database. `job.json` and `result.json` carry `schemaVersion`; migrations are pure functions per version. `events.ndjson` is append-only. `ollos gc --older-than 30d` removes jobs, cache entries and search indexes older than the cutoff; models stay. Nothing is sent anywhere — there is no telemetry.
 
 ---
 
@@ -533,7 +533,7 @@ Almost greenfield: a new package with no legacy. The real constraints come from 
 
 ### 10.1 Security
 
-SSRF guard in the resolver; mandatory masking of secrets in every output, log and event; media-derived text wrapped as untrusted content and the skill instructs agents to describe, never obey; no `eval`, nothing executed from media; `ytDlpArgs` through an allow-list; resource URIs resolved only under the job's own artifacts directory; **stdout guarded in the MCP entry point** — Tesseract writes "Image too small to scale!!" to stdout, which would corrupt JSON-RPC framing, so only JSON-RPC lines pass and everything else is diverted to stderr (verified with OCR running inside the server process). Details in [SECURITY.md](../SECURITY.md).
+SSRF guard in the resolver; mandatory masking of secrets in every output, log and event; media-derived text wrapped as untrusted content and the skill instructs agents to describe, never obey; no `eval`, nothing executed from media; `ytDlpArgs` through an allow-list; resource URIs resolved only under the job's own artifacts directory, from a job id validated against `^j_[0-9a-f]{12}$` (the SDK's URI matcher passes `..` and backslashes through, so the shape check is the boundary) and without creating directories on read; **stdout guarded in the MCP entry point** — Tesseract writes "Image too small to scale!!" to stdout, which would corrupt JSON-RPC framing, so only JSON-RPC lines pass and everything else is diverted to stderr (verified with OCR running inside the server process). Details in [SECURITY.md](../SECURITY.md).
 
 ### 10.2 Privacy
 
@@ -545,7 +545,7 @@ Local by default; no telemetry; network only for model download and the requeste
 
 ### 10.4 Reliability
 
-Fail loud (goal 4): each stage validates its output (frames > 0, audio > 0.5 s, text non-empty when VAD saw speech) or throws `PipelineError` with stage and cause — a direct lesson from the competitor's #15/#19/#22. `ffmpeg-static` pins the ffmpeg version so #14 cannot happen here. Idempotency via the cache. Limits (4 h duration, 2 GB download, 500 frames) are configurable and announced in the error.
+Fail loud (goal 4): each stage validates its output (frames > 0, audio > 0.5 s, text non-empty when VAD saw speech) or throws an `OllosError` (`PIPELINE_EMPTY_OUTPUT`, `FFMPEG_FAILED`, …) with the stage in its details and the underlying cause — a direct lesson from the competitor's #15/#19/#22. `ffmpeg-static` pins the ffmpeg version so #14 cannot happen here. Idempotency via the cache. Limits (4 h duration, 2 GB download, 500 frames) are configurable and announced in the error.
 
 ### 10.5 Evaluation
 
@@ -585,7 +585,7 @@ Node ≥ 20. Windows, macOS, Linux (x64/arm64) via the CI matrix. `ffmpeg-static
 
 ## 12. Delivery (as shipped in 0.1.0)
 
-All six planned slices are implemented: ears (probe, transcribe, jobs), eyes (keyframes, frames, sheets), the verdict (review, read_screen, secrets), who spoke (diarize, voice clips, Zoom tracks), memory (search), reach (CLI, skill, registry manifest, CI, docs). Deviations from the plan: diarization shipped as *experimental*; Tasks mode and progress notifications deferred; the standalone yt-dlp is downloaded on demand into `~/.ollos/bin`, not bundled with the package.
+All six planned slices are implemented: ears (probe, transcribe, jobs), eyes (keyframes, frames, sheets), the verdict (review, read_screen, secrets), who spoke (diarize, voice clips, Zoom tracks), memory (search), reach (CLI, skill, registry manifest, CI, docs). Deviations from the plan: diarization shipped as *experimental*; Tasks mode and progress notifications deferred; yt-dlp is not bundled; it is taken from `OLLOS_YTDLP` or `PATH`.
 
 ---
 

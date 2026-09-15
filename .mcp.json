@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ollos-dev": {
+      "command": "npx",
+      "args": ["tsx", "src/mcp/bin.ts"]
+    }
+  }
+}

@@ -18,15 +18,15 @@ Ten tools, one per distinct contract. Names are `ollos_*` in snake_case. Every t
 
 Poll `ollos_job` every few seconds. When `status` is `completed` it carries the same formatted result and resource links, so no further call is needed. Jobs are on disk: a `jobId` survives a server restart, and a job the process died on reports `interrupted` instead of hanging.
 
-**Errors** come back with `isError: true` and `{ code, message, hint }`. Codes are stable: `SOURCE_NOT_FOUND`, `SOURCE_UNSUPPORTED`, `UNSUPPORTED_TASK_FOR_KIND`, `DOWNLOAD_FAILED`, `DOWNLOAD_TOO_LARGE`, `PRIVATE_ADDRESS_BLOCKED`, `YTDLP_MISSING`, `YTDLP_FAILED`, `FFMPEG_MISSING`, `FFMPEG_FAILED`, `MODEL_MISSING_OFFLINE`, `MODEL_LOAD_FAILED`, `DURATION_EXCEEDED`, `PIPELINE_EMPTY_OUTPUT`, `JOB_NOT_FOUND`, `JOB_NOT_CANCELLABLE`, `INVALID_ARGUMENT`, `CANCELLED`, `INTERNAL`.
+**Errors** come back with `isError: true` and `{ code, message, hint }`. Codes are stable: `SOURCE_NOT_FOUND`, `SOURCE_UNSUPPORTED`, `UNSUPPORTED_TASK_FOR_KIND`, `DOWNLOAD_FAILED`, `DOWNLOAD_TOO_LARGE`, `PRIVATE_ADDRESS_BLOCKED`, `YTDLP_MISSING`, `YTDLP_FAILED`, `FFMPEG_MISSING`, `FFMPEG_FAILED`, `MODEL_MISSING_OFFLINE`, `MODEL_LOAD_FAILED`, `DURATION_EXCEEDED`, `PIPELINE_EMPTY_OUTPUT`, `JOB_NOT_FOUND`, `JOB_NOT_CANCELLABLE`, `INVALID_ARGUMENT`, `CANCELLED`, `INTERRUPTED` (the job's process stopped), `INTERNAL`.
 
 ## Common parameters
 
 | Parameter | Type | Meaning |
 |---|---|---|
 | `source` | string | Local path, `http(s)://` URL, video-site URL (needs `yt-dlp` on `PATH` or `OLLOS_YTDLP`; extra allow-listed flags via `OLLOS_YTDLP_ARGS`), `data:` URI, or a Zoom local-recording folder |
-| `from`, `to` | string | Window to analyse: `"90"`, `"1:30"`, `"0:01:30.5"` |
-| `format` | `"concise"` \| `"detailed"` | Concise (default) keeps the response small and points to resources |
+| `from`, `to` | number \| string | Window to analyse: seconds as a number (`90`) or `"90"`, `"1:30"`, `"0:01:30.5"` |
+| `format` | `"concise"` \| `"detailed"` | On every hybrid tool and `ollos_job`. Concise (default) keeps the response small and points to resources |
 
 ---
 
@@ -56,7 +56,7 @@ What the file really is, by `ffprobe`, never by extension.
 | Parameter | Default | Notes |
 |---|---|---|
 | `sensitivity` | `normal` | Hamming threshold on the 64-bit dHash: `low` 10, `normal` 6, `high` 3 |
-| `maxFrames` | 120 | Least-changed hash frames are dropped first; cuts and anchors are never dropped |
+| `maxFrames` | 120 | Least-changed hash frames are dropped first, then floor frames; if cuts and anchors alone still exceed the cap they are thinned by temporal spread (anchors kept first), never truncated at the tail |
 | `frameWidth` | 1280 | Saved frame width (capped at source width) |
 | `presenterRegion` | — | `{x,y,w,h}` fractions to ignore when comparing frames (webcam overlay) |
 | `anchorsSec[]` | — | Timestamps that must get a frame |
@@ -77,7 +77,7 @@ What the file really is, by `ffprobe`, never by extension.
 
 **OCR** runs per tile — a 2×2 grid plus one centred tile, each upscaled 3× — because 8 px UI text is unreadable at 1×, and modals sit exactly where a grid cuts.
 
-**Secret scanner** combines three signals: known patterns (OpenAI/Anthropic/GitHub/AWS/Google/Slack/Stripe keys, JWT with OCR-tolerant header, Bearer, private-key blocks, `.env` assignments, private deployment and local URLs, e-mail, CPF), high-entropy contiguous tokens, and nearby UI words (`API Key`, `Created`, `copy`, `secret`, `token`, `password`…). Confidence: `high` = strong pattern; `medium` = deployment/local URL, weak pattern or entropy with context; `low` = the rest and personal data. **Values are always masked** (`abcd…xyz` + length).
+**Secret scanner** combines three signals: known patterns (OpenAI/Anthropic/GitHub/AWS/Google/Slack/Stripe keys, JWT with OCR-tolerant header, Bearer, private-key blocks, `.env` assignments, private deployment and local URLs, e-mail, CPF), high-entropy contiguous tokens, and nearby UI phrases ("api key created", "make sure to copy", "copy your/this", "secret", "token", "password", ".env", "won't be able to see"…). Confidence: `high` = strong pattern; `medium` = deployment/local URL, weak pattern or entropy with context; `low` = the rest and personal data. **Values are always masked** (`abcd…xyz` + length), and the OCR text in `frames[].text` and `blocks[].text` is redacted with the same masks before it is returned, written or indexed.
 
 **Result** `frames[] { index, pts, text, meanConfidence, blocks[], secrets[] }`, `secrets[]` (deduplicated across frames), `images { frames, sheets }`, `stats`.
 
@@ -102,7 +102,7 @@ What the file really is, by `ffprobe`, never by extension.
 | `similarityThreshold` | 0.35 | Cosine above which two turns are one speaker |
 | `maxSpeakers`, `minSpeakers` | 8, 1 | |
 
-**Pipeline** pyannote-segmentation-3.0 (local labels per 10-second window) → merge into turns → WeSpeaker embedding for turns ≥ 1.5 s → average-linkage clustering → tiny clusters (≤ 2 turns and < 5 % of talk time) absorbed → short turns attached to the nearest labelled turn in time. With a Zoom folder the per-participant tracks are used directly and speakers are named.
+**Pipeline** pyannote-segmentation-3.0 (local labels per 10-second window) → merge into turns → WeSpeaker embedding for turns ≥ 1.5 s → average-linkage clustering → tiny clusters (≤ 2 turns and < 5 % of talk time) absorbed → short turns attached to the nearest labelled turn in time. With a Zoom folder that has more than one participant track, the tracks are used directly and speakers are named (a single track falls back to embeddings).
 
 **Result** `method` (`embeddings` \| `zoom-tracks`), `experimental`, `speakers[] { id, talkTimeSec, turns, voiceClip }`, `turns[] { startSec, endSec, speaker, confidence }`, `segments[]` (transcript with `speaker` filled, when a transcript was given).
 
@@ -123,7 +123,7 @@ BM25 over normalised tokens and `multilingual-e5-small` embeddings (`query:`/`pa
 
 ### `ollos_frames` — synchronous
 
-`{ jobId, sheets?: number[], frames?: number[], maxImages?: 6 }` → image content blocks from a completed `ollos_keyframes` or `ollos_read_screen` job. Defaults to the first two sheets.
+`{ jobId, sheets?: number[], frames?: number[], maxImages?: 6 }` → image content blocks from a completed `ollos_keyframes` or `ollos_read_screen` job, each preceded by a caption. Defaults to the first two sheets. `maxImages` counts images (default 6, max 12). `structuredContent`: `{ jobId, sheets[], frames[], images }`.
 
 ### `ollos_job` — synchronous
 
@@ -131,7 +131,7 @@ BM25 over normalised tokens and `multilingual-e5-small` embeddings (`query:`/`pa
 
 ### `ollos_cancel` — synchronous
 
-`{ jobId }` → aborts the running stage (ffmpeg and inference stop within about a second) and marks the job `cancelled`. Finished jobs are reported as `already-finished`.
+`{ jobId }` → aborts the running stage (ffmpeg and inference stop within about a second) and marks the job `cancelled`. A job that already finished comes back with its final `status` and `cancelled: false`, not as an error; a job owned by another ollos process whose heartbeat is still fresh returns `JOB_NOT_CANCELLABLE`.
 
 ---
 
