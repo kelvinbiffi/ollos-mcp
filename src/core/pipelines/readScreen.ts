@@ -5,9 +5,9 @@ import { Cache, hashOf } from '../cache/cache.js'
 import { OllosError } from '../errors.js'
 import type { JobContext } from '../jobs/types.js'
 import { fmtTime } from '../media/ffmpeg.js'
-import { resolveSource } from '../source/resolve.js'
+import { resolveSource, type ResolvedSource } from '../source/resolve.js'
 import { ocrFrame, type OcrBlock } from '../vision/ocr.js'
-import { scanText, SCANNER_VERSION, type Finding } from '../vision/secrets.js'
+import { redactText, scanTextDetailed, SCANNER_VERSION, type Finding } from '../vision/secrets.js'
 import { runKeyframes, type KeyframesResult } from './keyframes.js'
 import type { Sensitivity } from '../vision/dhash.js'
 import type { Box } from '../vision/frames.js'
@@ -50,25 +50,28 @@ export function estimateReadScreenSeconds(durationSec: number, maxFrames: number
   return 10 + durationSec * 0.04 + frames * 3.2
 }
 
-export async function runReadScreen(params: ReadScreenParams, ctx: JobContext, config: OllosConfig): Promise<ReadScreenResult> {
+export async function runReadScreen(params: ReadScreenParams, ctx: JobContext, config: OllosConfig, pre?: ResolvedSource): Promise<ReadScreenResult> {
   const t0 = Date.now()
   const langs = params.languages ?? ['por', 'eng']
   const detect = params.detectSecrets ?? true
 
   let kf = params.keyframes
   if (!kf) {
-    const src = await resolveSource(params.source, config, { signal: ctx.signal })
+    const src = pre ?? (await resolveSource(params.source, config, { signal: ctx.signal }))
     if (src.info.kind === 'image') {
       // single image: OCR it directly
       const jpeg = fs.readFileSync(src.path)
       ctx.progress('ocr', 0.2, 'reading image')
       const r = await ocrFrame(jpeg, config, { langs, signal: ctx.signal })
-      const secrets = detect ? scanText(r.text, { frameIndex: 1 }) : []
-      const frame: ScreenFrame = { index: 1, pts: 0, text: r.text, meanConfidence: r.meanConfidence, blocks: r.blocks, secrets }
+      const scan = detect ? scanTextDetailed(r.text, { frameIndex: 1 }) : { findings: [], raws: [] }
+      const secrets = scan.findings
+      // the value never leaves this pipeline: text and blocks are scrubbed with the same masks the findings carry
+      const text = redactText(r.text, scan.raws)
+      const frame: ScreenFrame = { index: 1, pts: 0, text, meanConfidence: r.meanConfidence, blocks: r.blocks.map((b) => ({ ...b, text: redactText(b.text, scan.raws) })), secrets }
       const artifacts = { json: path.join(ctx.artifactsDir, 'ocr.json'), txt: path.join(ctx.artifactsDir, 'ocr.txt') }
       const result: ReadScreenResult = { source: { input: src.input, identity: src.identity, durationSec: 0 }, frames: [frame], secrets, stats: { frames: 1, framesWithText: r.text ? 1 : 0, totalBlocks: r.blocks.length, ocrSec: r.ms / 1000, processingSec: (Date.now() - t0) / 1000 }, artifacts, cached: false }
       fs.writeFileSync(artifacts.json, JSON.stringify(result, null, 2))
-      fs.writeFileSync(artifacts.txt, r.text)
+      fs.writeFileSync(artifacts.txt, text)
       return result
     }
     ctx.progress('keyframes', 0.02, 'selecting frames to read')
@@ -91,8 +94,9 @@ export async function runReadScreen(params: ReadScreenParams, ctx: JobContext, c
     const f = kf.frames[i]!
     const jpeg = fs.readFileSync(f.file)
     const r = await ocrFrame(jpeg, config, { langs, signal: ctx.signal })
-    const secrets = detect ? scanText(r.text, { pts: f.pts, frameIndex: f.index }) : []
-    frames.push({ index: f.index, pts: f.pts, text: r.text, meanConfidence: r.meanConfidence, blocks: r.blocks, secrets })
+    const scan = detect ? scanTextDetailed(r.text, { pts: f.pts, frameIndex: f.index }) : { findings: [], raws: [] }
+    const secrets = scan.findings
+    frames.push({ index: f.index, pts: f.pts, text: redactText(r.text, scan.raws), meanConfidence: r.meanConfidence, blocks: r.blocks.map((b) => ({ ...b, text: redactText(b.text, scan.raws) })), secrets })
     ctx.progress('ocr', 0.3 + 0.65 * ((i + 1) / kf.frames.length), `reading frame ${i + 1}/${kf.frames.length} at ${fmtTime(f.pts)}${secrets.length ? ` — ${secrets.length} finding(s)` : ''}`)
   }
   const ocrSec = (Date.now() - tOcr) / 1000

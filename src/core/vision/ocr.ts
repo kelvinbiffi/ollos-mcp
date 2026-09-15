@@ -25,36 +25,72 @@ export interface OcrFrameResult {
  * A small pool of Tesseract workers (WASM). Creating a worker costs ~1 s and loads language data,
  * so we keep them alive across frames and jobs; the engine's `ocr` semaphore bounds parallel use.
  */
-class OcrPool {
+type WorkerFactory = (langs: string[], cachePath: string) => Promise<Worker>
+
+const defaultFactory: WorkerFactory = async (langs, cachePath) => {
+  const w = await createWorker(langs, 1, { cachePath, logger: () => {} })
+  await w.setParameters({ tessedit_pageseg_mode: '6' as never, preserve_interword_spaces: '1' })
+  return w
+}
+
+export class OcrPool {
   private workers: Worker[] = []
   private idle: Worker[] = []
-  private waiters: Array<(w: Worker) => void> = []
+  private waiters: Array<{ resolve: (w: Worker) => void; reject: (e: unknown) => void }> = []
   private created = 0
-  constructor(private readonly size: number, private readonly langs: string[], private readonly config: OllosConfig) {}
+  constructor(
+    private readonly size: number,
+    private readonly langs: string[],
+    private readonly config: OllosConfig,
+    private readonly factory: WorkerFactory = defaultFactory,
+  ) {}
 
   private async create(): Promise<Worker> {
     const cachePath = ensureDir(path.join(dirs.models(this.config), 'tesseract'))
     const have = this.langs.every((l) => fs.existsSync(path.join(cachePath, `${l}.traineddata`)) || fs.existsSync(path.join(cachePath, `${l}.traineddata.gz`)))
-    if (this.config.offline && !have) throw new OllosError('MODEL_MISSING_OFFLINE', `Tesseract language data (${this.langs.join(', ')}) is not downloaded and OLLOS_OFFLINE=1`, { hint: 'Run "ollos warmup" while online.' })
-    const w = await createWorker(this.langs, 1, { cachePath, logger: () => {} })
-    await w.setParameters({ tessedit_pageseg_mode: '6' as never, preserve_interword_spaces: '1' })
+    if (this.config.offline && !have) throw new OllosError('MODEL_MISSING_OFFLINE', `Tesseract language data (${this.langs.join(', ')}) is not downloaded and OLLOS_OFFLINE=1`, { hint: 'Run "ollos warmup --all" while online.' })
+    const w = await this.factory(this.langs, cachePath)
     this.workers.push(w)
     return w
   }
 
-  async acquire(): Promise<Worker> {
+  /**
+   * A worker that failed to start (offline without language data, a WASM download that dropped) must not count as
+   * created, or after `size` failures every later caller would wait forever on a pool that will never fill.
+   * The failure is handed to whoever is already waiting, and a waiter leaves when its job is cancelled.
+   */
+  async acquire(signal?: AbortSignal): Promise<Worker> {
+    if (signal?.aborted) throw new OllosError('CANCELLED', 'cancelled')
     const w = this.idle.pop()
     if (w) return w
     if (this.created < this.size) {
       this.created++
-      return this.create()
+      try {
+        return await this.create()
+      } catch (e) {
+        this.created--
+        for (const waiter of this.waiters.splice(0)) waiter.reject(e)
+        throw e
+      }
     }
-    return new Promise((resolve) => this.waiters.push(resolve))
+    return new Promise<Worker>((resolve, reject) => {
+      const entry = { resolve, reject }
+      this.waiters.push(entry)
+      signal?.addEventListener(
+        'abort',
+        () => {
+          const i = this.waiters.indexOf(entry)
+          if (i >= 0) this.waiters.splice(i, 1)
+          reject(new OllosError('CANCELLED', 'cancelled'))
+        },
+        { once: true },
+      )
+    })
   }
 
   release(w: Worker): void {
     const waiter = this.waiters.shift()
-    if (waiter) waiter(w)
+    if (waiter) waiter.resolve(w)
     else this.idle.push(w)
   }
 
@@ -117,7 +153,7 @@ export async function ocrFrame(jpeg: Buffer, config: OllosConfig, opts: { langs?
     {
       if (opts.signal?.aborted) throw new OllosError('CANCELLED', 'cancelled')
       const png = await cropUpscale(jpeg, box, scale)
-      const worker = await pool.acquire()
+      const worker = await pool.acquire(opts.signal)
       try {
         const { data } = await worker.recognize(png, {}, { text: true, blocks: true })
         const lines = linesOf(data)

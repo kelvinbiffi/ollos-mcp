@@ -289,7 +289,7 @@ export function createServer(ollos = new Ollos()): McpServer {
                     ? renderers.diarize(result as DiarizeResult, jobId, f)
                     : [{ type: 'text', text: JSON.stringify(result).slice(0, 4000) }]
           : [{ type: 'text', text: formatJob(job) }]
-        return { content, structuredContent: { status: 'completed' as const, jobId, kind: job.kind, cached: job.cached, result } }
+        return { content, structuredContent: { status: 'completed' as const, jobId, kind: job.kind, cached: (result as { cached?: boolean } | undefined)?.cached ?? false, result } }
       }
       return { content: [{ type: 'text', text: formatJob(job) }], structuredContent: { status: job.status, jobId, kind: job.kind, progress: job.progress, error: job.error ? { code: job.error.code, message: job.error.message, hint: job.error.hint } : undefined } }
     },

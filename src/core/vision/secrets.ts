@@ -119,8 +119,22 @@ function confidenceFor(rule: Rule, ctx: string | undefined): Finding['confidence
  * The entropy pass runs on the original text only: gluing prose together manufactures fake high-entropy tokens.
  */
 export function scanText(text: string, meta: Pick<Finding, 'pts' | 'frameIndex' | 'tile'> = {}): Finding[] {
+  return scanTextDetailed(text, meta).findings
+}
+
+export interface DetailedScan {
+  findings: Finding[]
+  /** The raw matched values, for redaction only. Never persisted, never returned by a tool. */
+  raws: string[]
+}
+
+/** Same as scanText but also hands back the raw values so the caller can scrub them out of the text it is about to return. */
+export function scanTextDetailed(text: string, meta: Pick<Finding, 'pts' | 'frameIndex' | 'tile'> = {}): DetailedScan {
   const out = new Map<string, Finding>()
-  const compact = text.replace(/\s+/g, '')
+  const raws = new Map<string, string>()
+  // spaces and tabs only: OCR splits tokens within a line ("up. railway .app"); gluing lines together made a key
+  // swallow the first word of the next line and produce a second, longer "finding" of the same secret
+  const compact = text.replace(/[ \t]+/g, '')
   const anyContext = contextAround(text, 0, text.length)
 
   for (const rule of RULES) {
@@ -134,6 +148,7 @@ export function scanText(text: string, meta: Pick<Finding, 'pts' | 'frameIndex' 
         if (ctx) signals.push('context')
         const key = rule.kind + ':' + mask(value) + ':' + value.length
         if (!out.has(key)) out.set(key, { kind: rule.kind, confidence: confidenceFor(rule, ctx), signals, masked: mask(value), length: value.length, context: ctx, ...meta })
+        raws.set(key, value)
       }
     }
   }
@@ -153,9 +168,32 @@ export function scanText(text: string, meta: Pick<Finding, 'pts' | 'frameIndex' 
     if (ctx) signals.push('context')
     const already = [...out.values()].some((f) => f.length === tok.length && f.masked === mask(tok))
     const key = 'high_entropy_token:' + mask(tok) + ':' + tok.length
-    if (!already && !out.has(key)) out.set(key, { kind: 'high_entropy_token', confidence: ctx ? 'medium' : 'low', signals, masked: mask(tok), length: tok.length, context: ctx, ...meta })
+    if (!already && !out.has(key)) {
+      out.set(key, { kind: 'high_entropy_token', confidence: ctx ? 'medium' : 'low', signals, masked: mask(tok), length: tok.length, context: ctx, ...meta })
+      raws.set(key, tok)
+    }
   }
-  return [...out.values()].sort((a, b) => rank(b) - rank(a))
+  return { findings: [...out.values()].sort((a, b) => rank(b) - rank(a)), raws: [...raws.values()] }
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * Replace every raw secret value in `text` with the same mask the finding carries, so the text returned next to
+ * a finding cannot be the leak the finding warns about. Compact-rule matches came from a whitespace-stripped view
+ * ("up. railway .app"), so each value is also matched with optional whitespace between its characters.
+ * Longest values first: a JWT contains shorter high-entropy tokens.
+ */
+export function redactText(text: string, raws: string[]): string {
+  let out = text
+  for (const raw of [...new Set(raws)].sort((a, b) => b.length - a.length)) {
+    if (raw.length < 4) continue
+    const masked = mask(raw)
+    out = out.split(raw).join(masked)
+    const loose = new RegExp(raw.split('').map(escapeRe).join('\\s*'), 'g')
+    out = out.replace(loose, masked)
+  }
+  return out
 }
 
 function rank(f: Finding): number {

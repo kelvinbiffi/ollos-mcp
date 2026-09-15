@@ -32,7 +32,31 @@ export function writeFileAtomic(file: string, data: string | Buffer): void {
   ensureDir(path.dirname(file))
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
   fs.writeFileSync(tmp, data)
-  fs.renameSync(tmp, file)
+  try {
+    renameWithRetry(tmp, file)
+  } catch (e) {
+    fs.rmSync(tmp, { force: true })
+    throw e
+  }
+}
+
+/**
+ * On Windows, renaming over a file another process has open (a CLI poll, an antivirus scan, a second MCP instance)
+ * throws EPERM/EBUSY for a few milliseconds. Verified on this machine; a bare renameSync inside the heartbeat timer
+ * was enough to kill the server. Retry briefly before giving up.
+ */
+export function renameWithRetry(from: string, to: string, attempts = 5): void {
+  const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+  for (let i = 0; ; i++) {
+    try {
+      fs.renameSync(from, to)
+      return
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code
+      if (i >= attempts - 1 || !['EPERM', 'EBUSY', 'EACCES'].includes(code ?? '')) throw e
+      sleep(15 * 2 ** i)
+    }
+  }
 }
 
 export function readJSON<T>(file: string): T {

@@ -6,7 +6,7 @@ import { OllosError } from '../errors.js'
 import type { JobContext } from '../jobs/types.js'
 import { decodePcm16k } from '../media/decode.js'
 import { fmtTime, resolveBinaries, run } from '../media/ffmpeg.js'
-import { assertKindSupports, resolveSource } from '../source/resolve.js'
+import { assertKindSupports, resolveSource, type ResolvedSource } from '../source/resolve.js'
 import { detectSpeech } from '../audio/vad.js'
 import { clusterSpeakers, segmentSpeakers, speakerEmbeddings, speakerName, toTurns, type Turn } from '../audio/diarize.js'
 import type { Segment, TranscribeResult } from './transcribe.js'
@@ -59,10 +59,10 @@ function assignSpeakers(segments: Segment[], turns: Turn[]): Segment[] {
   })
 }
 
-export async function runDiarize(params: DiarizeParams, ctx: JobContext, config: OllosConfig): Promise<DiarizeResult> {
+export async function runDiarize(params: DiarizeParams, ctx: JobContext, config: OllosConfig, pre?: ResolvedSource): Promise<DiarizeResult> {
   const t0 = Date.now()
   ctx.progress('resolve', 0.01, 'resolving source')
-  const src = await resolveSource(params.source, config, { signal: ctx.signal })
+  const src = pre ?? (await resolveSource(params.source, config, { signal: ctx.signal }))
   assertKindSupports(src.info, 'diarize')
   const threshold = params.similarityThreshold ?? 0.35
   const window = { fromSec: params.fromSec, toSec: params.toSec }

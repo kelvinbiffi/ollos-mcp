@@ -87,7 +87,7 @@ export class Ollos {
     return this.engine.cancel(jobId)
   }
   jobs() {
-    return this.engine.store.list()
+    return this.engine.list()
   }
   events(jobId: string) {
     return this.engine.store.readEvents(jobId)

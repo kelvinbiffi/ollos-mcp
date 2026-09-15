@@ -31,7 +31,6 @@ export interface JobRecord<P = unknown> {
   error?: JobError
   /** Job that produced inputs this one reuses (e.g. diarize reusing a transcript). */
   parentJobId?: string
-  cached?: boolean
 }
 
 export interface JobEvent {
@@ -54,10 +53,15 @@ export interface JobContext {
   event: (e: Omit<JobEvent, 'ts'>) => void
 }
 
-export interface JobDefinition<P, R> {
+export interface JobDefinition<P, R, Pre = unknown> {
   kind: string
   resourceClass: ResourceClass | ((params: P) => ResourceClass)
-  /** Rough seconds of work, used for the inline fast path and ETA. */
-  estimateSeconds: (params: P) => Promise<number> | number
-  run: (params: P, ctx: JobContext) => Promise<R>
+  /**
+   * Resolve what the job needs to be estimated (typically the source: a URL download, a probe). Runs once, under the
+   * job's AbortSignal, with the job already visible as `queued`, so a slow download is cancellable and never repeated.
+   */
+  prepare?: (params: P, signal: AbortSignal) => Promise<Pre>
+  /** Rough seconds of work, used for the inline fast path and ETA. Receives what `prepare` returned. */
+  estimateSeconds: (params: P, pre: Pre | undefined) => Promise<number> | number
+  run: (params: P, ctx: JobContext, pre: Pre | undefined) => Promise<R>
 }
