@@ -34,7 +34,15 @@ jobs:
           test "$PKG" = "$TAG" || { echo "package.json is $PKG but tag is $TAG"; exit 1; }
       # With a Trusted Publisher configured on npmjs.com for this repo + workflow, no secret is needed:
       # npm exchanges the GitHub OIDC token itself. NPM_TOKEN is only a fallback.
-      - run: npm publish --provenance --access public
+      # 0.1.0 was published from a workstation (browser 2FA); a re-run must not fail on "version already exists"
+      - name: Publish to npm unless this version is already there
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "ollos-mcp@$VERSION" version >/dev/null 2>&1; then
+            echo "ollos-mcp@$VERSION is already on npm; skipping publish"
+          else
+            npm publish --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
