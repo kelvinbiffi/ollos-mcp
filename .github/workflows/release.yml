@@ -1,7 +1,8 @@
 name: Release
 
 # Publishes to npm with provenance and to the MCP Registry when a GitHub release is published.
-# npm: uses trusted publishing (OIDC) when configured on npmjs.com; otherwise set the NPM_TOKEN secret.
+# npm: trusted publishing (OIDC) once a Trusted Publisher is configured on npmjs.com for kelvinbiffi/ollos-mcp + release.yml;
+# the NPM_TOKEN secret is only a fallback (npm is phasing out tokens that bypass 2FA).
 on:
   release:
     types: [published]
@@ -21,6 +22,8 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
           cache: npm
+      # Trusted publishing (OIDC, no token) needs npm >= 11.5; the Node 22 image ships an older npm
+      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm run typecheck && npm test && npm run build
       - name: Check version matches the tag
@@ -29,6 +32,8 @@ jobs:
           PKG=$(node -p "require('./package.json').version")
           TAG="${GITHUB_REF_NAME#v}"
           test "$PKG" = "$TAG" || { echo "package.json is $PKG but tag is $TAG"; exit 1; }
+      # With a Trusted Publisher configured on npmjs.com for this repo + workflow, no secret is needed:
+      # npm exchanges the GitHub OIDC token itself. NPM_TOKEN is only a fallback.
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
