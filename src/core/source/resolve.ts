@@ -8,6 +8,7 @@ import { Readable } from 'node:stream'
 import { OllosError } from '../errors.js'
 import type { OllosConfig } from '../config.js'
 import { probe, type MediaInfo } from '../media/probe.js'
+import { normalizeVideo } from '../media/normalize.js'
 import { assertPublicHost } from './ssrf.js'
 import { Cache, fileIdentity } from '../cache/cache.js'
 import { run } from '../media/ffmpeg.js'
@@ -191,6 +192,13 @@ export async function resolveSource(input: string, config: OllosConfig, opts: Re
   // the same limit for every origin: a 6-hour livestream URL is not more welcome than a 6-hour local file
   if (src.info.durationSec > config.limits.maxDurationSec) {
     throw new OllosError('DURATION_EXCEEDED', `media is ${Math.round(src.info.durationSec / 60)} min, limit is ${Math.round(config.limits.maxDurationSec / 60)} min`, { hint: 'Use from/to to analyse a window, or raise OLLOS_MAX_DURATION_SEC.' })
+  }
+  // Every pipeline downstream (keyframes, scene cuts, OCR crops) reads frames through ffmpeg; normalise once
+  // here instead of teaching each of them to cope with whatever shape the source file happens to be in.
+  // `identity` stays the source's, so caches keyed on it are unaffected by the file the pipeline actually reads.
+  if (src.info.kind === 'video') {
+    const normalized = await normalizeVideo(src.path, src.info, src.identity, config, { signal: opts.signal })
+    return { ...src, path: normalized.path, info: normalized.info }
   }
   return src
 }

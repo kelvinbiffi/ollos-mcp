@@ -4,7 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- `ollos_read_screen` (and every other pipeline that extracts frames) failing on some screen recordings with `colourspace: parameter space not set`, always on the last sampled frame. Every video is now normalised once, up front, into a canonical H.264/yuv420p/bt709 MP4 with even dimensions and an integer frame rate before any frame is touched, so an unusual source resolution or a fractional frame rate — the frequent shape of a screen capture — no longer reaches the mjpeg encoder at all. Cached by source identity, so re-analysing the same file does not re-transcode it.
 
 ## [0.1.0] — 2026-09-15
 
