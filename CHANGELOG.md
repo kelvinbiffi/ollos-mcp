@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Fixed
 
 - `ollos_read_screen` (and every other pipeline that extracts frames) failing on some screen recordings with `colourspace: parameter space not set`, always on the last sampled frame. Every video is now normalised once, up front, into a canonical H.264/yuv420p/bt709 MP4 with even dimensions and an integer frame rate before any frame is touched, so an unusual source resolution or a fractional frame rate — the frequent shape of a screen capture — no longer reaches the mjpeg encoder at all. Cached by source identity, so re-analysing the same file does not re-transcode it.
+- **#1** `ollos_keyframes`/`ollos_read_screen` reporting hard-cut timestamps relative to the `from`/`to` window instead of the source: `-ss` sits before `-i`, so ffmpeg's own `pts_time` was already relative to the seek point, and the pipeline added the window offset a second time on every candidate except cuts.
+- **#3** The secrets check missing content that sat unchanging on screen for a while (a credential left visible in an editor): change-detected keyframe selection contributes at most one candidate for a static screen, and the frame cap's prune step dropped that candidate on the same terms as a genuinely redundant one. The secrets check now samples at a fixed 4 s cadence regardless of visual change and protects that guarantee through pruning (`preserveFloor`); its report states the coverage achieved, and says so plainly when a very long recording could not be read in full.
+
+### Changed
+
+- **#2** `structuredContent.result` on `ollos_job` and the hybrid tools no longer ships the full pipeline result unconditionally — one real `read_screen` job returned ~62,000 characters and tripped a client's own tool-result limit. Results past the response token budget are trimmed per kind (OCR bounding boxes dropped and per-frame text capped for `read_screen`, perceptual hashes dropped for `keyframes`, oldest transcript segments dropped for `transcribe`/`diarize`) with a `trimmedForResponse` note pointing at the resource that still has everything.
 
 ## [0.1.0] — 2026-09-15
 
