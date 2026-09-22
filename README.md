@@ -22,6 +22,8 @@ npx ollos review talk.mp4
 
 ---
 
+**Contents:** [Why](#why) · [Install](#install) · [Tools](#tools) · [Sources](#sources) · [CLI](#cli) · [Library](#library) · [How it works](#how-it-works-and-what-was-measured) · [Evaluation](#evaluation) · [Requirements & performance](#requirements-and-performance) · [Privacy & security](#privacy--security) · [Configuration](#configuration) · [Troubleshooting](#troubleshooting) · [Known limits](#known-limits) · [Roadmap](#roadmap)
+
 ## Why
 
 Agents can't hear or watch. Today you either pay a transcription API, install a Python pipeline, or paste frames by hand. Ollos runs Whisper, speaker segmentation, perceptual-hash keyframing and OCR **in Node, through ONNX Runtime**, on your machine. The file never leaves it.
@@ -143,6 +145,8 @@ Numbers below were measured on an 11:37 screencast (1890×1080, webcam overlay) 
 
 **Secrets.** Three signals, because OCR garbles the secret more often than the words around it. On a real "API Key Created" modal the plain JWT regex missed (OCR read `eyJ` as `eyl`), the entropy detector caught the 157-char token, and the UI context read at 66%. With an OCR-tolerant JWT pattern, native-resolution frames and a centre tile, the end-to-end run now reports it as `high · jwt · near "API Key"` → `block`. The first version also produced 58 false positives by running the entropy test on whitespace-stripped text; that is a regression test now. Values are always masked; the tool that warns about a leak must not be the leak.
 
+Change-detected keyframes are the wrong tool for this specific check: a credential left on an unchanging screen for a minute contributes one dHash candidate, and a frame cap's prune step used to drop that one candidate on the same terms as a genuinely redundant frame — real miss, filed as #3. `ollos_review`'s secrets check now reads the screen at a fixed 4-second cadence regardless of whether the picture changed, protects that guarantee through the frame cap (`preserveFloor`), and states the coverage it actually achieved in the finding — `Read the full 11:37 at a 4s cadence` on a normal-length recording, or an explicit `Partial coverage: …` note bounded by `OLLOS_MAX_FRAMES` on a very long one, instead of a clean verdict that silently checked less than it implied.
+
 **Speakers.** Segmentation alone labelled three speakers on a one-person video (its ids are local to each 10-second window). Embedding every turn ≥ 1.5 s, average-linkage clustering at cosine 0.35, and absorbing tiny clusters brought it to one. The evaluation then showed the real failure mode: the same voice scores 0.58–0.86 against itself across positions and lengths, but 0.06–0.16 once background music is under it, so a jingle or an outro becomes its own "speaker" at any threshold. The tool stays experimental and says so in its output.
 
 **Jobs.** Client timeouts are short (Messages API ~60 s). Every long tool returns a job handle; state lives in `~/.ollos/jobs/<id>/job.json`, written atomically, with a 5-second heartbeat. On restart, orphaned jobs become `interrupted` instead of hanging forever. Small work (< 8 s estimated) runs inline and returns directly.
@@ -219,7 +223,7 @@ Planned, in order of value (see Roadmap):
 | `OLLOS_MAX_DOWNLOAD_MB` | `2048` | download cap |
 | `OLLOS_MAX_DURATION_SEC` | `14400` | media longer than this is refused (use `from`/`to`) |
 | `OLLOS_CONCURRENCY_VISION` / `_OCR` / `_DOWNLOAD` | `2` | parallel jobs per class (ASR is fixed at 1) |
-| `OLLOS_MAX_FRAMES` | `500` | hard cap on frames per keyframes job |
+| `OLLOS_MAX_FRAMES` | `500` | hard cap on frames per keyframes job; also bounds how much of a very long recording `ollos_review`'s secrets check can cover at its fixed cadence (see Secrets above) |
 | `OLLOS_RESPONSE_TOKENS` | `20000` | response budget before truncation with a pointer to the resource |
 | `OLLOS_INLINE_THRESHOLD_SEC` | `8` | estimated work under this runs inline; `0` never inlines |
 | `OLLOS_FFMPEG` / `OLLOS_FFPROBE` / `OLLOS_YTDLP` | auto | explicit binary paths |
