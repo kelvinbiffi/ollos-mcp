@@ -1,4 +1,4 @@
-import sharp from 'sharp'
+import sharp, { type OverlayOptions } from 'sharp'
 import { resolveBinaries, run, fmtTime } from '../media/ffmpeg.js'
 import type { Window } from '../media/decode.js'
 import type { OllosConfig } from '../config.js'
@@ -95,7 +95,7 @@ export async function contactSheet(tiles: SheetTile[], opts: { cols?: number; ti
   const gap = 4
   const W = cols * tileWidth + (cols + 1) * gap
   const H = rows * tileH + (rows + 1) * gap
-  const composites: sharp.OverlayOptions[] = []
+  const composites: OverlayOptions[] = []
   resized.forEach((r, i) => {
     const col = i % cols
     const row = Math.floor(i / cols)
