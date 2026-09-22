@@ -13,6 +13,16 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Changed
 
 - **#2** `structuredContent.result` on `ollos_job` and the hybrid tools no longer ships the full pipeline result unconditionally — one real `read_screen` job returned ~62,000 characters and tripped a client's own tool-result limit. Results past the response token budget are trimmed per kind (OCR bounding boxes dropped and per-frame text capped for `read_screen`, perceptual hashes dropped for `keyframes`, oldest transcript segments dropped for `transcribe`/`diarize`) with a `trimmedForResponse` note pointing at the resource that still has everything.
+- All 10 tools now declare `readOnlyHint`, `destructiveHint`, `idempotentHint` and `openWorldHint` explicitly, matched to what each tool actually does, instead of a partial subset.
+
+### Fixed
+
+- `ollos_probe`, `ollos_search`, `ollos_frames` and `ollos_cancel` throwing a raw MCP protocol error (`-32602`) instead of a clean tool-level error whenever their handler failed: their `outputSchema` declared the success shape as fully required with no room for the `{ status, error }` that the shared error path actually sends, so the SDK's own response validation rejected it. Found by a new MCP-level test suite that calls every tool by name through a real client/server pair instead of the pipeline functions directly — the project previously had zero tests at that layer.
+- `sharp`'s TypeScript types moved from a global namespace to named exports in 0.35; `OverlayOptions` is now imported directly instead of referenced as `sharp.OverlayOptions`.
+
+### Security
+
+- Bumped `sharp` to 0.35.4 (patches libvips and libheif CVEs) and added an `overrides` entry so the copy nested inside `@huggingface/transformers` gets deduplicated to the same patched version instead of shipping the vulnerable 0.34.5 alongside it.
 
 ## [0.1.0] — 2026-09-15
 
