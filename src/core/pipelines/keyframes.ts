@@ -20,6 +20,16 @@ export interface KeyframesParams {
   anchorsSec?: number[]
   /** Guarantee at least one frame every N seconds (0 disables). */
   floorSec?: number
+  /**
+   * Keep every floor-guaranteed frame when trimming to `maxFrames`, instead of treating it as equally
+   * droppable as a redundant same-screen hash candidate. Without this, a long static screen (e.g. a
+   * credential left visible in an editor for a minute) is exactly the kind of candidate the prune step
+   * removes first — it has no visual change to justify keeping it — silently breaking the floor's
+   * "at least one frame every floorSec seconds" guarantee. Off by default because it can make the prune
+   * step keep less of the *changing* parts of a long video; a caller whose job is not to miss anything
+   * static (the secrets check) turns it on and pairs it with a tight floorSec.
+   */
+  preserveFloor?: boolean
   sheetCols?: number
   fromSec?: number
   toSec?: number
@@ -100,7 +110,7 @@ export async function runKeyframes(params: KeyframesParams, ctx: JobContext, con
   const to = params.toSec ?? src.info.durationSec
 
   const cache = new Cache(config)
-  const key = hashOf(src.identity, sensitivity, maxFrames, frameWidth, params.presenterRegion ?? null, floorSec, params.sheetCols ?? 3, from, to, (params.anchorsSec ?? []).map((a) => Math.round(a * 2) / 2))
+  const key = hashOf(src.identity, sensitivity, maxFrames, frameWidth, params.presenterRegion ?? null, floorSec, params.preserveFloor ?? false, params.sheetCols ?? 3, from, to, (params.anchorsSec ?? []).map((a) => Math.round(a * 2) / 2))
   const hit = cache.getJSON<KeyframesResult>('keyframes', key)
   if (hit && hit.frames.every((f) => fs.existsSync(f.file)) && hit.sheets.every((s) => fs.existsSync(s.file))) {
     ctx.event({ stage: 'cache', event: 'info', message: 'keyframes served from cache' })
@@ -158,8 +168,13 @@ export async function runKeyframes(params: KeyframesParams, ctx: JobContext, con
 
   let pruned = 0
   if (merged.length > maxFrames) {
-    // 1. hash/floor-only candidates go first, least change first — they are the compressible part
-    const droppable = merged.filter((c) => c.sources.size === 1 && (c.sources.has('hash') || c.sources.has('floor'))).sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0))
+    // 1. hash/floor-only candidates go first, least change first — they are the compressible part.
+    // With preserveFloor, a floor candidate is the one thing standing between "at least one frame every
+    // floorSec seconds" and a long unchanging screen (a credential left on screen) vanishing entirely; only
+    // hash candidates (genuinely redundant, a real dHash match nearby) are droppable here.
+    const droppable = merged
+      .filter((c) => c.sources.size === 1 && (c.sources.has('hash') || (!params.preserveFloor && c.sources.has('floor'))))
+      .sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0))
     const toDrop = new Set(droppable.slice(0, merged.length - maxFrames))
     pruned = toDrop.size
     merged = merged.filter((c) => !toDrop.has(c))

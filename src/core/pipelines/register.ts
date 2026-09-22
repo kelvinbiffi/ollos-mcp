@@ -48,7 +48,7 @@ export function registerPipelines(engine: JobEngine, config: OllosConfig): void 
     kind: 'review',
     resourceClass: (p) => ((p.checks ?? ['loudness', 'silences', 'aspect', 'secrets']).includes('secrets') ? 'ocr' : 'light'),
     prepare: prepare(config),
-    estimateSeconds: (p, pre) => estimateReviewSeconds(windowDuration(pre, p.fromSec, p.toSec), p.checks ?? ['loudness', 'silences', 'aspect', 'secrets']),
+    estimateSeconds: (p, pre) => estimateReviewSeconds(windowDuration(pre, p.fromSec, p.toSec), p.checks ?? ['loudness', 'silences', 'aspect', 'secrets'], config.limits.maxFrames),
     run: (p, ctx, pre) => runReview(p, ctx, config, pre),
   })
   engine.register<DiarizeParams, DiarizeResult, ResolvedSource>({

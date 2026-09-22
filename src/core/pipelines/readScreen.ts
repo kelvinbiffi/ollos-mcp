@@ -23,6 +23,10 @@ export interface ReadScreenParams {
   toSec?: number
   /** Reuse frames from a finished keyframes job instead of extracting again. */
   keyframes?: KeyframesResult
+  /** Forwarded to the internal keyframes selection — see KeyframesParams.floorSec. */
+  floorSec?: number
+  /** Forwarded to the internal keyframes selection — see KeyframesParams.preserveFloor. */
+  preserveFloor?: boolean
 }
 
 export interface ScreenFrame {
@@ -40,7 +44,7 @@ export interface ReadScreenResult {
   /** Frame images and contact sheets used for the OCR pass, so ollos_frames can show them. */
   images?: { frames: Array<{ index: number; pts: number; file: string; sheet: number; tile: number }>; sheets: Array<{ index: number; file: string; frames: number[] }> }
   secrets: Finding[]
-  stats: { frames: number; framesWithText: number; totalBlocks: number; ocrSec: number; processingSec: number }
+  stats: { frames: number; framesWithText: number; totalBlocks: number; ocrSec: number; processingSec: number; candidateFrames: number; framesPruned: number }
   artifacts: { json: string; txt: string }
   cached: boolean
 }
@@ -69,14 +73,14 @@ export async function runReadScreen(params: ReadScreenParams, ctx: JobContext, c
       const text = redactText(r.text, scan.raws)
       const frame: ScreenFrame = { index: 1, pts: 0, text, meanConfidence: r.meanConfidence, blocks: r.blocks.map((b) => ({ ...b, text: redactText(b.text, scan.raws) })), secrets }
       const artifacts = { json: path.join(ctx.artifactsDir, 'ocr.json'), txt: path.join(ctx.artifactsDir, 'ocr.txt') }
-      const result: ReadScreenResult = { source: { input: src.input, identity: src.identity, durationSec: 0 }, frames: [frame], secrets, stats: { frames: 1, framesWithText: r.text ? 1 : 0, totalBlocks: r.blocks.length, ocrSec: r.ms / 1000, processingSec: (Date.now() - t0) / 1000 }, artifacts, cached: false }
+      const result: ReadScreenResult = { source: { input: src.input, identity: src.identity, durationSec: 0 }, frames: [frame], secrets, stats: { frames: 1, framesWithText: r.text ? 1 : 0, totalBlocks: r.blocks.length, ocrSec: r.ms / 1000, processingSec: (Date.now() - t0) / 1000, candidateFrames: 1, framesPruned: 0 }, artifacts, cached: false }
       fs.writeFileSync(artifacts.json, JSON.stringify(result, null, 2))
       fs.writeFileSync(artifacts.txt, text)
       return result
     }
     ctx.progress('keyframes', 0.02, 'selecting frames to read')
     // native width: OCR of small UI text degrades fast below the source resolution (8 px text is already the limit)
-    kf = await runKeyframes({ source: params.source, sensitivity: params.sensitivity ?? 'normal', maxFrames: params.maxFrames ?? 80, frameWidth: 3840, presenterRegion: params.presenterRegion, fromSec: params.fromSec, toSec: params.toSec }, { ...ctx, progress: (s, f, m) => ctx.progress('keyframes:' + s, 0.02 + f * 0.28, m) }, config, src)
+    kf = await runKeyframes({ source: params.source, sensitivity: params.sensitivity ?? 'normal', maxFrames: params.maxFrames ?? 80, frameWidth: 3840, presenterRegion: params.presenterRegion, fromSec: params.fromSec, toSec: params.toSec, floorSec: params.floorSec, preserveFloor: params.preserveFloor }, { ...ctx, progress: (s, f, m) => ctx.progress('keyframes:' + s, 0.02 + f * 0.28, m) }, config, src)
   }
 
   const cache = new Cache(config)
@@ -128,7 +132,7 @@ export async function runReadScreen(params: ReadScreenParams, ctx: JobContext, c
     frames,
     images: { frames: kf.frames.map((f) => ({ index: f.index, pts: f.pts, file: f.file, sheet: f.sheet, tile: f.tile })), sheets: kf.sheets },
     secrets,
-    stats: { frames: frames.length, framesWithText: frames.filter((f) => f.text.trim()).length, totalBlocks: frames.reduce((a, f) => a + f.blocks.length, 0), ocrSec: Number(ocrSec.toFixed(1)), processingSec: Number(((Date.now() - t0) / 1000).toFixed(1)) },
+    stats: { frames: frames.length, framesWithText: frames.filter((f) => f.text.trim()).length, totalBlocks: frames.reduce((a, f) => a + f.blocks.length, 0), ocrSec: Number(ocrSec.toFixed(1)), processingSec: Number(((Date.now() - t0) / 1000).toFixed(1)), candidateFrames: kf.frames.length + kf.stats.pruned, framesPruned: kf.stats.pruned },
     artifacts,
     cached: false,
   }

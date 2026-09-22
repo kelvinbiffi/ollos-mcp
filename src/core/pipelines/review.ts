@@ -42,9 +42,15 @@ export interface ReviewResult {
   stats: { processingSec: number }
 }
 
-export function estimateReviewSeconds(durationSec: number, checks: Check[]): number {
+/** How often the secrets check reads the screen regardless of whether it changed — see SECRETS_CADENCE_SEC. */
+const SECRETS_CADENCE_SEC = 4
+
+export function estimateReviewSeconds(durationSec: number, checks: Check[], maxFramesCap = 500): number {
   let s = 4 + durationSec * 0.06 // loudness + silences are one decode each
-  if (checks.includes('secrets')) s += 10 + durationSec * 0.04 + Math.min(80, durationSec / 6) * 3.2
+  if (checks.includes('secrets')) {
+    const frames = Math.min(maxFramesCap, Math.ceil(durationSec / SECRETS_CADENCE_SEC))
+    s += 10 + durationSec * 0.04 + frames * 3.2
+  }
   return s
 }
 
@@ -118,16 +124,30 @@ export async function runReview(params: ReviewParams, ctx: JobContext, config: O
 
   if (checks.includes('secrets')) {
     if (src.info.kind === 'video' || src.info.kind === 'image') {
-      const rs = await runReadScreen({ source: params.source, detectSecrets: true, maxFrames: 80, presenterRegion: params.presenterRegion, fromSec: params.fromSec, toSec: params.toSec }, { ...ctx, progress: (s, f, m) => ctx.progress('secrets:' + s, 0.05 + 0.9 * ((done + f) / checks.length), m) }, config)
+      const windowSec = Math.max(1, (params.toSec ?? src.info.durationSec) - (params.fromSec ?? 0))
+      // Change-detected keyframes (the default selection) can miss a secret entirely: a credential left
+      // visible in an editor for a minute is one unchanging screen, so dHash contributes at most one
+      // candidate for it, and under a global frame cap that candidate is exactly the kind the prune step
+      // drops first (issue #3). The secrets check instead reads the screen at a fixed cadence regardless of
+      // visual change, and preserveFloor keeps that guarantee through the prune step too.
+      const neededFrames = Math.ceil(windowSec / SECRETS_CADENCE_SEC)
+      const maxFrames = Math.min(config.limits.maxFrames, neededFrames)
+      const rs = await runReadScreen({ source: params.source, detectSecrets: true, maxFrames, floorSec: SECRETS_CADENCE_SEC, preserveFloor: true, presenterRegion: params.presenterRegion, fromSec: params.fromSec, toSec: params.toSec }, { ...ctx, progress: (s, f, m) => ctx.progress('secrets:' + s, 0.05 + 0.9 * ((done + f) / checks.length), m) }, config)
       measurements.secrets = rs.secrets
       const high = rs.secrets.filter((f) => f.confidence === 'high')
       const medium = rs.secrets.filter((f) => f.confidence === 'medium')
       const low = rs.secrets.filter((f) => f.confidence === 'low')
       const list = (fs: Finding[], n = 8) => fs.slice(0, n).map((f) => `${f.kind} ${f.masked} at ${fmtTime(f.pts ?? 0)}${f.context ? ` (near "${f.context}")` : ''}`).join('; ') + (fs.length > n ? `; +${fs.length - n} more in the report` : '')
-      if (high.length) findings.push({ check: 'secrets', severity: 'block', title: `${high.length} probable secret${high.length > 1 ? 's' : ''} visible on screen`, detail: list(high) + ' — revoke the credential even if you cut the frame; anyone who paused the video may have it.', atSec: high[0]!.pts, data: { findings: high } })
-      if (medium.length) findings.push({ check: 'secrets', severity: 'warn', title: `${medium.length} possible secret${medium.length > 1 ? 's' : ''} on screen`, detail: list(medium), atSec: medium[0]!.pts, data: { findings: medium } })
-      if (low.length) findings.push({ check: 'secrets', severity: 'info', title: `${low.length} low-confidence token(s) / personal data on screen`, detail: list(low, 5), data: { findings: low } })
-      if (!rs.secrets.length) findings.push({ check: 'secrets', severity: 'ok', title: `No secrets found in ${rs.stats.frames} frames`, detail: '' })
+      // Honest about what was actually looked at: complete only when every needed frame both fit under the
+      // frame cap and survived pruning. The report must say so either way (issue #3) — a clean verdict on
+      // partial coverage is worse than no verdict, because it reads as a guarantee that was never checked.
+      const coverageSec = Math.min(windowSec, rs.stats.frames * SECRETS_CADENCE_SEC)
+      const complete = maxFrames >= neededFrames && rs.stats.framesPruned === 0
+      const coverage = complete ? `Read the full ${fmtTime(windowSec)} at a ${SECRETS_CADENCE_SEC}s cadence (${rs.stats.frames} frame(s)).` : `Partial coverage: read ~${fmtTime(coverageSec)} of ${fmtTime(windowSec)} at a ${SECRETS_CADENCE_SEC}s cadence (${rs.stats.frames} of ${neededFrames} frame(s) needed — raise OLLOS_MAX_FRAMES or narrow from/to for full coverage).`
+      if (high.length) findings.push({ check: 'secrets', severity: 'block', title: `${high.length} probable secret${high.length > 1 ? 's' : ''} visible on screen`, detail: `${list(high)} — revoke the credential even if you cut the frame; anyone who paused the video may have it. ${coverage}`, atSec: high[0]!.pts, data: { findings: high, coverageSec, complete } })
+      if (medium.length) findings.push({ check: 'secrets', severity: 'warn', title: `${medium.length} possible secret${medium.length > 1 ? 's' : ''} on screen`, detail: `${list(medium)} ${coverage}`, atSec: medium[0]!.pts, data: { findings: medium, coverageSec, complete } })
+      if (low.length) findings.push({ check: 'secrets', severity: 'info', title: `${low.length} low-confidence token(s) / personal data on screen`, detail: `${list(low, 5)} ${coverage}`, data: { findings: low, coverageSec, complete } })
+      if (!rs.secrets.length) findings.push({ check: 'secrets', severity: complete ? 'ok' : 'warn', title: complete ? `No secrets found in ${rs.stats.frames} frames` : `No secrets found, but coverage was partial`, detail: coverage, data: { coverageSec, complete } })
     } else findings.push({ check: 'secrets', severity: 'info', title: 'Audio only, on-screen check skipped', detail: '' })
     step()
   }
