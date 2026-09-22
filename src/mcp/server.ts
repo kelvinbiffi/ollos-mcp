@@ -12,7 +12,7 @@ import type { ReviewResult } from '../core/pipelines/review.js'
 import type { DiarizeResult } from '../core/pipelines/diarize.js'
 import { PLATFORMS } from '../core/media/measure.js'
 import { parseTime } from '../core/media/ffmpeg.js'
-import { formatDiarize, formatJob, formatKeyframes, formatReadScreen, formatReview, formatSearch, formatTranscribe, uris, type Format } from './format.js'
+import { formatDiarize, formatJob, formatKeyframes, formatReadScreen, formatReview, formatSearch, formatTranscribe, trimStructuredResult, uris, type Format } from './format.js'
 
 const PKG = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }
 
@@ -56,7 +56,7 @@ export function createServer(ollos = new Ollos()): McpServer {
     const submit = { transcribe: ollos.transcribe, keyframes: ollos.keyframes, read_screen: ollos.readScreen, review: ollos.review, diarize: ollos.diarize }[kind].bind(ollos) as (p: never) => Promise<{ job: JobRecord; result?: R; etaSeconds?: number }>
     const { job, result, etaSeconds } = await submit(params as never)
     if (job.status === 'completed' && result) {
-      return { content: render(result, job.id), structuredContent: { status: 'completed' as const, jobId: job.id, cached: (result as { cached?: boolean }).cached ?? false, result } }
+      return { content: render(result, job.id), structuredContent: { status: 'completed' as const, jobId: job.id, cached: (result as { cached?: boolean }).cached ?? false, result: trimStructuredResult(kind, job.id, result, budget) } }
     }
     if (job.status === 'failed' || job.status === 'cancelled' || job.status === 'interrupted') return errorResult(new OllosError((job.error?.code as never) ?? 'INTERNAL', job.error?.message ?? job.status, { hint: job.error?.hint, details: job.error?.details }))
     const eta = Math.round(etaSeconds ?? 0)
@@ -300,7 +300,7 @@ export function createServer(ollos = new Ollos()): McpServer {
                     ? renderers.diarize(result as DiarizeResult, jobId, f)
                     : [{ type: 'text', text: JSON.stringify(result).slice(0, 4000) }]
           : [{ type: 'text', text: formatJob(job) }]
-        return { content, structuredContent: { status: 'completed' as const, jobId, kind: job.kind, cached: (result as { cached?: boolean } | undefined)?.cached ?? false, result } }
+        return { content, structuredContent: { status: 'completed' as const, jobId, kind: job.kind, cached: (result as { cached?: boolean } | undefined)?.cached ?? false, result: trimStructuredResult(job.kind, jobId, result, budget) } }
       }
       return { content: [{ type: 'text', text: formatJob(job) }], structuredContent: { status: job.status, jobId, kind: job.kind, progress: job.progress, error: job.error ? { code: job.error.code, message: job.error.message, hint: job.error.hint } : undefined } }
     },

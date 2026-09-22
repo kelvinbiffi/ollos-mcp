@@ -21,6 +21,66 @@ export function truncateToBudget(text: string, budgetTokens: number, pointer: st
   return text.slice(0, keep) + `\n\n[…truncated to fit the response budget. Full content: ${pointer}]`
 }
 
+function capText(text: string, maxChars: number): string {
+  return text.length <= maxChars ? text : text.slice(0, maxChars) + '…'
+}
+
+/** Keep segments in order until the next one would push `structuredContent` over budget. */
+function capSegments<T>(segments: T[], budgetTokens: number): { segments: T[]; omitted: number } {
+  let used = 0
+  const kept: T[] = []
+  for (const s of segments) {
+    const t = estimateTokens(JSON.stringify(s))
+    if (kept.length > 0 && used + t > budgetTokens) break
+    used += t
+    kept.push(s)
+  }
+  return { segments: kept, omitted: segments.length - kept.length }
+}
+
+/**
+ * The token budget above applies to the text content; `structuredContent.result` had none of its own and
+ * always carried the whole pipeline result. On a long `read_screen` job that is tens of thousands of OCR
+ * bounding boxes in `frames[].blocks` — one real job hit ~62,000 characters and tripped a client's own
+ * tool-result size limit before the client ever got to read it (issue #2). The text content and the job's
+ * resource links (ocr.txt, transcript.txt, sheet images…) already carry the full detail, so this drops the
+ * heaviest, most redundant field per kind and caps what free text remains, instead of shipping it twice.
+ * Small results are returned unchanged — most jobs never come close to the budget.
+ */
+export function trimStructuredResult(kind: string, jobId: string, result: unknown, budgetTokens: number): unknown {
+  if (result === null || typeof result !== 'object') return result
+  if (estimateTokens(JSON.stringify(result)) <= budgetTokens) return result
+
+  switch (kind) {
+    case 'read_screen': {
+      const r = result as ReadScreenResult
+      const perFrame = Math.max(60, Math.floor(budgetTokens / Math.max(1, r.frames.length)))
+      return {
+        ...r,
+        frames: r.frames.map((f) => ({ index: f.index, pts: f.pts, text: capText(f.text, perFrame * 3), meanConfidence: f.meanConfidence, secrets: f.secrets })),
+        trimmedForResponse: `blocks omitted, text capped per frame — full detail at ${uris.ocr(jobId)}`,
+      }
+    }
+    case 'keyframes': {
+      const r = result as KeyframesResult
+      return { ...r, frames: r.frames.map(({ hash, ...f }) => f), trimmedForResponse: 'perceptual hashes omitted' }
+    }
+    case 'transcribe': {
+      const r = result as TranscribeResult
+      const { segments, omitted } = capSegments(r.segments, budgetTokens)
+      return { ...r, segments, trimmedForResponse: omitted > 0 ? `${omitted} of ${r.segments.length} segment(s) omitted — full transcript at ${uris.transcript(jobId)}` : undefined }
+    }
+    case 'diarize': {
+      const r = result as DiarizeResult
+      if (!r.segments) return r
+      const { segments, omitted } = capSegments(r.segments, budgetTokens)
+      return { ...r, segments, trimmedForResponse: omitted > 0 ? `${omitted} of ${r.segments.length} segment(s) omitted — full transcript at ${uris.transcriptSpeakers(jobId)}` : undefined }
+    }
+    default:
+      return result
+  }
+}
+
 /**
  * Text that came out of the media — speech, on-screen text — is data, never instructions.
  * We say so in the payload itself, so a client that concatenates blindly still carries the warning.
