@@ -53,8 +53,11 @@ export async function detectSceneCuts(file: string, config: OllosConfig, opts: W
   const { ffmpeg } = resolveBinaries(config)
   const th = opts.threshold ?? 0.3
   const { stderr } = await run(ffmpeg, ['-v', 'info', '-nostdin', ...windowArgs(opts), '-i', file, '-an', '-vf', `${opts.mask ? maskFilter(opts.mask).slice(1) + ',' : ''}select='gt(scene,${th})',showinfo`, '-fps_mode', 'vfr', '-f', 'null', '-'], { signal: opts.signal })
+  // `-ss` sits before `-i`, so ffmpeg seeks first and showinfo's pts_time is relative to that seek point, not to
+  // the source. Every other candidate (sampleThumbnails, anchors) is already in source time; cuts must match.
+  const fromSec = opts.fromSec ?? 0
   const out: number[] = []
-  for (const m of stderr.matchAll(/pts_time:\s*([0-9.]+)/g)) out.push(Number(m[1]))
+  for (const m of stderr.matchAll(/pts_time:\s*([0-9.]+)/g)) out.push(fromSec + Number(m[1]))
   return out
 }
 

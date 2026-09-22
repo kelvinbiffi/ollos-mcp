@@ -85,6 +85,15 @@ describe('media layer on a generated clip', () => {
     expect(kept.length).toBeLessThanOrEqual(2)
   })
 
+  it('reports cut timestamps in source time even when a window is set (issue #1)', async () => {
+    // -ss sits before -i, so ffmpeg's own pts_time is relative to the seek; a window starting at 2 s must
+    // still report the cut at ~4 s of the source, not ~2 s into the window.
+    const cuts = await detectSceneCuts(clip, config, { threshold: 0.3, fromSec: 2, toSec: 8 })
+    expect(cuts.length).toBe(1)
+    expect(cuts[0]).toBeGreaterThan(3.5)
+    expect(cuts[0]).toBeLessThan(4.5)
+  })
+
   it('extracts a frame and builds a contact sheet', async () => {
     const a = await extractFrame(clip, 1, config, { width: 320 })
     const b = await extractFrame(clip, 6, config, { width: 320 })
